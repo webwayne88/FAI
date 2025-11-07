@@ -73,17 +73,17 @@ async def schedule_matches(
 
         if tournament_mode:
             # В турнирном режиме: получаем ВСЕ слоты на дату, отсортированные по времени
-            room_slots = await get_all_room_slots_on_date(session, target_date.date())
-            # Фильтруем только свободные
-            available_slots = [
-                slot for slot in room_slots
-                if not slot.is_occupied and slot.player1_id is None
-            ]
-            # Берём самый ранний блок времени (все слоты в один момент — один раунд)
-            if not available_slots:
-                logging.warning("Нет свободных слотов для турнирного раунда.")
-                return {"scheduled_count": 0, "reserve_users": 0}
+            # В турнирном режиме игнорируем фильтр по времени и ищем полностью свободные слоты
+            available_slots = await get_available_room_slots(
+                session,
+                target_date,
+                ignore_time_filter=True,
+            )
 
+            if not available_slots:
+                logging.warning(f"Слоты на {target_date.date()} не найдены. Запускаю автоматическое создание...")
+                await create_rooms_and_slots(target_date=target_date, slot_duration_minutes=slot_duration_minutes)
+                available_slots = await get_available_room_slots(session, target_date)
             # Определяем время первого свободного раунда
             first_slot_time = min(slot.start_time for slot in available_slots)
             round_slots = [
@@ -139,9 +139,15 @@ async def get_active_users(session: AsyncSession, target_date: datetime) -> List
         .where(~busy_subq)
         .order_by(User.matches_played.asc(), User.declines_count.asc())
     )
-    logging.info(f"Найдено {len(users)} активных пользователей для планирования на {target_date.date()}.")
-    logging.info(f"Активные пользователи: {[user.full_name for user in users]}")
-    return result.scalars().all()
+    users = result.scalars().all()
+    logging.info(
+        "Найдено %s активных пользователей для планирования на %s.",
+        len(users),
+        target_date.date(),
+    )
+    logging.info("Активные пользователи: %s", [user.full_name for user in users])
+    return users
+
 
 
 async def get_available_room_slots(

@@ -30,9 +30,9 @@ UTC_TZ = timezone.utc
 
 DEFAULT_ROOM_COUNT = 8
 
-DEBATE_TIME_MINUTES = 2 # 6
-analyze_time = 10 # 14
-slot_duration_minutes = DEBATE_TIME_MINUTES + analyze_time
+DEBATE_TIME_MINUTES = 6
+analyze_time = 14
+slot_duration_minutes = DEBATE_TIME_MINUTES + analyze_time + 10
 
 _PERIOD_START_UTC = time(11, 0, tzinfo=UTC_TZ)
 _PERIOD_END_UTC = time(13, 0, tzinfo=UTC_TZ)
@@ -47,15 +47,13 @@ PERIODS = {
 _now = datetime.now(MOSCOW_TZ)
 TOURNAMENT_SLOT_STARTS_MSK = [
     (_now + timedelta(minutes=1)).time(),
-    (_now + timedelta(minutes=15)).time(),
+    (_now + timedelta(minutes=25)).time(),
 ]
-
-
 
 #для тестирования       
 TOURNAMENT_SLOT_STARTS_MSK = [
-    time(14, 0),
-    time(14, 30),
-    time(15, 0),
-    time(15, 30),
+    time(11, 0),
+    time(11, 30),
+    time(12, 0),
+    time(12, 30),
 ]

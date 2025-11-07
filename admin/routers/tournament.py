@@ -93,7 +93,6 @@ async def run_scheduling(
 
         # Запускаем турнирный раунд
         result = await schedule_matches(
-            session=db, 
             target_date=target_datetime,
             elimination=request.elimination,
             tournament_mode=True  # <-- ключевой флаг
