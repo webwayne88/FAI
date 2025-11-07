@@ -1,0 +1,1518 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Админ-панель турнира</title>
+    <link rel="stylesheet" href="static/styles.css">
+    <link rel="icon" type="image/png" href="static/favicon_3.png">
+    <style>
+        /* Стили для модального окна анализа и транскрипции */
+        .large-modal {
+            max-width: 800px;
+            max-height: 90vh;
+        }
+
+        .analysis-tabs {
+            display: flex;
+            border-bottom: 1px solid #ddd;
+            margin-bottom: 15px;
+        }
+
+        .analysis-tab-btn {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .analysis-tab-btn.active {
+            border-bottom-color: #007bff;
+            color: #007bff;
+            font-weight: bold;
+        }
+
+        .analysis-tab-content {
+            display: none;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .analysis-tab-content.active {
+            display: block;
+        }
+
+        .analysis-text {
+            white-space: pre-wrap;
+            line-height: 1.5;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            max-height: 55vh;
+            overflow-y: auto;
+        }
+
+        /* Улучшаем отображение ссылок в расписании */
+        .analysis-link, .transcription-link {
+            display: inline-block;
+            margin: 2px 5px 2px 0;
+            padding: 4px 8px;
+            background: #e9ecef;
+            border-radius: 3px;
+            font-size: 12px;
+            text-decoration: none;
+            color: #495057;
+            cursor: pointer;
+        }
+
+        .analysis-link:hover, .transcription-link:hover {
+            background: #dee2e6;
+        }
+
+        .case-link {
+            display: inline-block;
+            margin: 2px 0;
+            padding: 4px 8px;
+            background: #e9ecef;
+            border-radius: 3px;
+            font-size: 12px;
+            text-decoration: none;
+            color: #495057;
+        }
+
+        .case-link:hover {
+            background: #dee2e6;
+        }
+
+        /* Обновляем grid для 6 колонок */
+        .schedule-header, .schedule-item {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr;
+            gap: 10px;
+            padding: 10px;
+            align-items: center;
+        }
+
+        @media (max-width: 768px) {
+            .schedule-header, .schedule-item {
+                grid-template-columns: 1fr;
+                text-align: left;
+            }
+            
+            .schedule-header > div, .schedule-item > div {
+                display: flex;
+                justify-content: space-between;
+            }
+            
+            .schedule-header > div::before, .schedule-item > div::before {
+                content: attr(data-label);
+                font-weight: bold;
+                margin-right: 10px;
+            }
+            
+            .analysis-tabs {
+                flex-direction: column;
+            }
+            
+            .analysis-tab-btn {
+                text-align: left;
+                border-bottom: 1px solid #ddd;
+                border-left: 2px solid transparent;
+            }
+            
+            .analysis-tab-btn.active {
+                border-left-color: #007bff;
+                border-bottom-color: #ddd;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Заголовок -->
+        <h1>Админ-панель турнира</h1>
+
+        <!-- Вкладки -->
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="schedule">Расписание</button>
+            <button class="tab-btn" data-tab="cases">Кейсы</button>
+            <button class="tab-btn" data-tab="users">Пользователи</button>
+        </div>
+
+        <!-- Вкладка: Расписание -->
+        <div id="schedule-tab" class="tab-content active">
+            <!-- Блок планирования -->
+            <div class="scheduling-section">
+                <h2>Планирование матчей</h2>
+                <div class="scheduling-controls">
+                    <div class="control-group">
+                        <label for="scheduleStartDatePicker">Начальная дата:</label>
+                        <input type="date" id="scheduleStartDatePicker" class="date-picker">
+                    </div>
+                    <div class="control-group">
+                        <label for="scheduleEndDatePicker">Конечная дата:</label>
+                        <input type="date" id="scheduleEndDatePicker" class="date-picker">
+                    </div>
+
+                    <div class="control-group">
+                        <label for="eliminationMode">Режим планирования:</label>
+                        <div>
+                            <input type="radio" id="eliminationOn" name="eliminationMode" value="true" checked>
+                            <label for="eliminationOn">С выбыванием</label>
+                            <input type="radio" id="eliminationOff" name="eliminationMode" value="false">
+                            <label for="eliminationOff">Без выбывания</label>
+                        </div>
+                    </div>
+
+                    <!-- В блоке кнопок, добавим кнопку нового цикла -->
+                    <div class="button-container">
+                        <button class="btn" id="startBtn">Запланировать</button>
+                        <button class="btn btn-danger" id="deleteSlotsBtn">Очистить слоты</button>
+                        <button class="btn btn-warning" id="resetCycleBtn">Новый цикл</button>
+                    </div>
+
+                </div>
+                <div class="status" id="status">Готово к планированию</div>
+            </div>
+
+            <!-- Блок просмотра расписания -->
+            <div class="schedule-section">
+                <h2>Расписание по комнатам</h2>
+                <div class="schedule-controls">
+                    <div class="control-group">
+                        <label for="roomSelect">Комната:</label>
+                        <select id="roomSelect" class="room-select">
+                            <option value="">-- Выберите комнату --</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="datePicker">Дата просмотра:</label>
+                        <input type="date" id="datePicker" class="date-picker">
+                    </div>
+                </div>
+
+                <div class="schedule-container" id="scheduleContainer">
+                    <div class="schedule-header">
+                        <div>Время</div>
+                        <div>Статус</div>
+                        <div>Игрок 1</div>
+                        <div>Игрок 2</div>
+                        <div>Кейс</div>
+                        <div>Анализ и транскрипция</div>
+                    </div>
+                    <div class="schedule-list" id="scheduleList">
+                        <div class="schedule-loading">Выберите комнату и дату для просмотра расписания</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Вкладка: Кейсы -->
+        <div id="cases-tab" class="tab-content">
+            <!-- Статистика -->
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-value" id="usersCount">0</div>
+                    <div class="stat-label">Участников</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="roomsCount">0</div>
+                    <div class="stat-label">Комнат</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="slotsCount">0</div>
+                    <div class="stat-label">Слотов</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="casesCount">0</div>
+                    <div class="stat-label">Кейсов</div>
+                </div>
+            </div>
+
+            <!-- Управление кейсами - только загрузка файла -->
+            <div class="cases-section">
+                <h2>Управление кейсами</h2>
+                <div class="cases-controls">
+                    <div class="control-group">
+                        <label for="casesFile">Загрузить файл с кейсами (DOCX):</label>
+                        <input type="file" id="casesFile" accept=".docx">
+                    </div>
+                    <div class="button-container">
+                        <button class="btn" id="uploadCasesBtn">Загрузить и распарсить</button>
+                    </div>
+                </div>
+
+                <!-- Список кейсов с поиском -->
+                <div class="cases-list">
+                    <h3>Список кейсов</h3>
+                    
+                    <!-- Поиск кейсов -->
+                    <div class="cases-list-controls">
+                        <div class="control-group">
+                            <label for="caseSearch">Поиск кейсов:</label>
+                            <input type="text" id="caseSearch" placeholder="Введите текст для поиска">
+                        </div>
+                        <div class="button-container">
+                            <button class="btn" id="searchCasesBtn">Поиск</button>
+                            <button class="btn btn-secondary" id="clearSearchBtn">Сбросить</button>
+                        </div>
+                    </div>
+
+                    <div class="status" id="casesStatus">Готово к загрузке</div>
+                    <div class="cases-loading" id="casesLoading">Загрузка кейсов...</div>
+                    
+                    <!-- Таблица кейсов с сортировкой по клику на заголовок -->
+                    <div class="cases-table-container">
+                        <table class="cases-table">
+                            <thead>
+                                <tr>
+                                    <th data-sort="title" class="sortable">Название <span class="sort-icon"></span></th>
+                                    <th data-sort="content" class="sortable">Содержание <span class="sort-icon"></span></th>
+                                    <th data-sort="roles" class="sortable">Роли <span class="sort-icon"></span></th>
+                                    <th data-sort="created_at" class="sortable">Дата создания <span class="sort-icon"></span></th>
+                                    <th data-sort="is_active" class="sortable">Статус <span class="sort-icon"></span></th>
+                                    <th>Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody id="casesContainer"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Пагинация -->
+                    <div class="pagination" id="pagination">
+                        <button class="btn btn-small" id="prevPageBtn" disabled>← Назад</button>
+                        <span class="page-info" id="pageInfo">Страница 1 из 1</span>
+                        <button class="btn btn-small" id="nextPageBtn" disabled>Вперед →</button>
+                    </div>
+                </div>
+                
+                <!-- Ручное добавление кейса -->
+                <div class="manual-case-creation">
+                    <h3>Добавить кейс вручную</h3>
+                    <div class="control-group">
+                        <label for="caseTitle">Название кейса:</label>
+                        <input type="text" id="caseTitle" placeholder="Введите название">
+                    </div>
+                    <div class="control-group">
+                        <label for="caseContent">Содержание кейса:</label>
+                        <textarea id="caseContent" rows="4" placeholder="Описание, условия, сюжет"></textarea>
+                    </div>
+                    <div class="control-group">
+                        <label for="caseRoles">Роли и интересы:</label>
+                        <textarea id="caseRoles" rows="2" placeholder="Игрок 1: ..., Игрок 2: ..."></textarea>
+                    </div>
+                    <div class="button-container">
+                        <button class="btn" id="addManualCaseBtn">Добавить кейс</button>
+                    </div>
+                    <div class="status" id="manualCaseStatus"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Вкладка: Пользователи - убрана статистика -->
+        <div id="users-tab" class="tab-content">
+            <!-- Управление пользователями -->
+            <div class="users-section">
+                <h2>Управление пользователями</h2>
+
+                <!-- Поиск и фильтрация -->
+                <div class="users-controls cases-list-controls">
+                    <div class="control-group">
+                        <label for="userSearch">Поиск пользователей:</label>
+                        <input type="text" id="userSearch" placeholder="По имени или университету">
+                    </div>
+                    <!-- Добавляем чекбокс для фильтрации -->
+                    <div class="control-group">
+                        <label for="hideEliminatedCheckbox">
+                            <input type="checkbox" id="hideEliminatedCheckbox" checked>
+                            Показывать только активных (не выбывших)
+                        </label>
+                    </div>
+                    <div class="button-container">
+                        <button class="btn btn-small" id="searchUsersBtn">Поиск</button>
+                        <button class="btn btn-small btn-secondary" id="clearUserSearchBtn">Сбросить</button>
+                    </div>
+                </div>
+
+                <!-- Список пользователей -->
+                <div class="users-list">
+                    <h3>Список пользователей</h3>
+                    <div class="status" id="usersStatus">Готово к загрузке</div>
+                    <div class="users-loading" id="usersLoading">Загрузка пользователей...</div>
+                    
+                    <div class="users-container" id="usersContainer">
+                        <div class="users-header">
+                            <div data-sort="id" class="sortable">ID <span class="sort-icon"></span></div>
+                            <div data-sort="full_name" class="sortable">Имя <span class="sort-icon"></span></div>
+                            <div data-sort="university" class="sortable">Университет <span class="sort-icon"></span></div>
+                            <div data-sort="matches_played" class="sortable">Матчей <span class="sort-icon"></span></div>
+                            <div data-sort="wins_count" class="sortable">Побед <span class="sort-icon"></span></div>
+                            <div data-sort="sum_points" class="sortable">Баллы <span class="sort-icon"></span></div>
+                            <div data-sort="total_transcription_length" class="sortable">Длина транскрипции <span class="sort-icon"></span></div>
+                            <div data-sort="eliminated" class="sortable">Выбыл <span class="sort-icon"></span></div>
+                            <div>Действия</div>
+                        </div>
+                        <div class="users-list-content" id="usersListContent"></div>
+                    </div>
+
+                    <!-- Пагинация -->
+                    <div class="pagination" id="usersPagination">
+                        <button class="btn btn-small" id="prevUsersPageBtn" disabled>← Назад</button>
+                        <span class="page-info" id="usersPageInfo">Страница 1 из 1</span>
+                        <button class="btn btn-small" id="nextUsersPageBtn" disabled>Вперед →</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно: Просмотр кейса -->
+    <div id="caseModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2 id="modalCaseTitle"></h2>
+            <div id="modalCaseContent"></div>
+        </div>
+    </div>
+
+    <!-- Модальное окно: Редактирование кейса -->
+    <div id="editCaseModal" class="modal">
+        <div class="modal-content">
+            <span class="close" id="closeEditModal">&times;</span>
+            <h2>Редактирование кейса</h2>
+            <div class="control-group">
+                <label for="editCaseTitle">Название:</label>
+                <input type="text" id="editCaseTitle">
+            </div>
+            <div class="control-group">
+                <label for="editCaseContent">Содержание:</label>
+                <textarea id="editCaseContent" rows="6"></textarea>
+            </div>
+            <div class="control-group">
+                <label for="editCaseRoles">Роли и интересы:</label>
+                <textarea id="editCaseRoles" rows="3"></textarea>
+            </div>
+            <div class="control-group">
+                <label for="editCaseActive">Активен:</label>
+                <input type="checkbox" id="editCaseActive">
+            </div>
+            <input type="hidden" id="editCaseId">
+            <div class="button-container">
+                <button class="btn" id="saveCaseBtn">Сохранить</button>
+                <button class="btn btn-secondary" id="cancelEditBtn">Отмена</button>
+            </div>
+            <div class="status" id="editCaseStatus"></div>
+        </div>
+    </div>
+
+    <!-- Модальное окно: Редактирование пользователя -->
+    <div id="editUserModal" class="modal">
+        <div class="modal-content">
+            <span class="close" id="closeEditUserModal">&times;</span>
+            <h2>Редактирование пользователя</h2>
+            <div class="control-group">
+                <label for="editUserName">Имя:</label>
+                <input type="text" id="editUserName">
+            </div>
+            <div class="control-group">
+                <label for="editUserUniversity">Университет:</label>
+                <input type="text" id="editUserUniversity">
+            </div>
+            <div class="control-group">
+                <label for="editUserMatchesPlayed">Сыграно матчей:</label>
+                <input type="number" id="editUserMatchesPlayed" min="0">
+            </div>
+            <div class="control-group">
+                <label for="editUserWinsCount">Количество побед:</label>
+                <input type="number" id="editUserWinsCount" min="0">
+            </div>
+            <div class="control-group">
+                <label for="editUserSumPoints">Сумма баллов:</label>
+                <input type="number" id="editUserSumPoints" min="0">
+            </div>
+            <div class="control-group">
+                <label for="editUserTotalTranscriptionLength">Длина транскрипции:</label>
+                <input type="number" id="editUserTotalTranscriptionLength" min="0">
+            </div>
+            <div class="control-group">
+                <label for="editUserEliminated">Выбыл:</label>
+                <input type="checkbox" id="editUserEliminated">
+            </div>
+            <div class="control-group">
+                <label for="editUserTimePreference">Предпочтение по времени:</label>
+                <select id="editUserTimePreference">
+                    <option value="">Не указано</option>
+                    <option value="MORNING">Утром (9:00-12:00)</option>
+                    <option value="AFTERNOON">Днём (12:00-18:00)</option>
+                    <option value="EVENING">Вечером (18:00-23:00)</option>
+                    <option value="ANYTIME">Без разницы</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label for="editUserRegistered">Зарегистрирован:</label>
+                <input type="checkbox" id="editUserRegistered">
+            </div>
+            <input type="hidden" id="editUserId">
+            <div class="button-container">
+                <button class="btn" id="saveUserBtn">Сохранить</button>
+                <button class="btn btn-secondary" id="cancelUserEditBtn">Отмена</button>
+            </div>
+            <div class="status" id="editUserStatus"></div>
+        </div>
+    </div>
+
+    <!-- Модальное окно: Анализ и транскрипция -->
+    <div id="analysisModal" class="modal">
+        <div class="modal-content large-modal">
+            <span class="close" id="closeAnalysisModal">&times;</span>
+            <h2 id="analysisModalTitle"></h2>
+            <div class="analysis-tabs">
+                <button class="analysis-tab-btn active" data-tab="player1">Анализ игрока 1</button>
+                <button class="analysis-tab-btn" data-tab="player2">Анализ игрока 2</button>
+                <button class="analysis-tab-btn" data-tab="transcription">Транскрипция</button>
+            </div>
+            <div class="analysis-content">
+                <div id="player1Analysis" class="analysis-tab-content active">
+                    <div class="analysis-text" id="player1AnalysisText"></div>
+                </div>
+                <div id="player2Analysis" class="analysis-tab-content">
+                    <div class="analysis-text" id="player2AnalysisText"></div>
+                </div>
+                <div id="transcriptionContent" class="analysis-tab-content">
+                    <div class="analysis-text" id="transcriptionText"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // === Элементы DOM ===
+            const startBtn = document.getElementById('startBtn');
+            const statusDiv = document.getElementById('status');
+            const roomSelect = document.getElementById('roomSelect');
+            const datePicker = document.getElementById('datePicker');
+            const scheduleDatePicker = document.getElementById('scheduleDatePicker');
+            const scheduleList = document.getElementById('scheduleList');
+            const uploadCasesBtn = document.getElementById('uploadCasesBtn');
+            const casesFileInput = document.getElementById('casesFile');
+            const casesStatusDiv = document.getElementById('casesStatus');
+            const casesContainer = document.getElementById('casesContainer');
+            const casesLoading = document.getElementById('casesLoading');
+            const prevPageBtn = document.getElementById('prevPageBtn');
+            const nextPageBtn = document.getElementById('nextPageBtn');
+            const pageInfo = document.getElementById('pageInfo');
+            const tabBtns = document.querySelectorAll('.tab-btn');
+            const tabContents = document.querySelectorAll('.tab-content');
+            const deleteSlotsBtn = document.getElementById('deleteSlotsBtn');
+            const reserveScheduleBtn = document.getElementById('reserveScheduleBtn');
+            const addManualCaseBtn = document.getElementById('addManualCaseBtn');
+            const manualCaseStatusDiv = document.getElementById('manualCaseStatus');
+            const caseTitleInput = document.getElementById('caseTitle');
+            const caseContentInput = document.getElementById('caseContent');
+            const caseRolesInput = document.getElementById('caseRoles');
+            const searchCasesBtn = document.getElementById('searchCasesBtn');
+            const clearSearchBtn = document.getElementById('clearSearchBtn');
+            const caseSearchInput = document.getElementById('caseSearch');
+
+            // === Элементы для пользователей ===
+            const userSearchInput = document.getElementById('userSearch');
+            const searchUsersBtn = document.getElementById('searchUsersBtn');
+            const clearUserSearchBtn = document.getElementById('clearUserSearchBtn');
+            const usersStatusDiv = document.getElementById('usersStatus');
+            const usersLoading = document.getElementById('usersLoading');
+            const usersListContent = document.getElementById('usersListContent');
+            const prevUsersPageBtn = document.getElementById('prevUsersPageBtn');
+            const nextUsersPageBtn = document.getElementById('nextUsersPageBtn');
+            const usersPageInfo = document.getElementById('usersPageInfo');
+
+            // === Модальные окна ===
+            const caseModal = document.getElementById('caseModal');
+            const modalCaseTitle = document.getElementById('modalCaseTitle');
+            const modalCaseContent = document.getElementById('modalCaseContent');
+            const closeModalBtn = document.querySelector('#caseModal .close');
+
+            const editCaseModal = document.getElementById('editCaseModal');
+            const closeEditModal = document.getElementById('closeEditModal');
+            const cancelEditBtn = document.getElementById('cancelEditBtn');
+            const saveCaseBtn = document.getElementById('saveCaseBtn');
+            const editCaseStatusDiv = document.getElementById('editCaseStatus');
+
+            const editUserModal = document.getElementById('editUserModal');
+            const closeEditUserModal = document.getElementById('closeEditUserModal');
+            const cancelUserEditBtn = document.getElementById('cancelUserEditBtn');
+            const saveUserBtn = document.getElementById('saveUserBtn');
+            const editUserStatusDiv = document.getElementById('editUserStatus');
+
+            const analysisModal = document.getElementById('analysisModal');
+            const closeAnalysisModal = document.getElementById('closeAnalysisModal');
+
+            // === Пагинация ===
+            let currentPage = 1;
+            let totalPages = 1;
+            let currentSearch = '';
+            const casesPerPage = 5;
+
+            let currentUsersPage = 1;
+            let totalUsersPages = 1;
+            let currentUsersSearch = '';
+            let currentUsersSortBy = 'full_name';
+            let currentUsersSortOrder = 'asc';
+            const usersPerPage = 10;
+
+            // === Сортировка кейсов ===
+            let currentCasesSortBy = 'created_at';
+            let currentCasesSortOrder = 'desc';
+
+            // === Установка дат ===
+            const today = new Date();
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            if (datePicker) datePicker.valueAsDate = today;
+            if (scheduleDatePicker) scheduleDatePicker.valueAsDate = tomorrow;
+
+            function formatDateToDDMMYYYY(dateString) {
+                const date = new Date(dateString);
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day} ${month} ${year}`;
+            }
+
+            // === Функции преобразования времени ===
+            function timePreferenceToApiValue(russianValue) {
+                const mapping = {
+                    'Утром (9:00-12:00)': 'MORNING',
+                    'Днём (12:00-18:00)': 'AFTERNOON',
+                    'Вечером (18:00-23:00)': 'EVENING',
+                    'Без разницы': 'ANYTIME'
+                };
+                return mapping[russianValue] || '';
+            }
+
+            function timePreferenceToDisplay(apiValue) {
+                const mapping = {
+                    'MORNING': 'Утром (9:00-12:00)',
+                    'AFTERNOON': 'Днём (12:00-18:00)',
+                    'EVENING': 'Вечером (18:00-23:00)',
+                    'ANYTIME': 'Без разницы'
+                };
+                return mapping[apiValue] || apiValue || 'Не указано';
+            }
+
+            // === Обработчики вкладок ===
+            if (tabBtns.length > 0) {
+                tabBtns.forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        tabBtns.forEach(b => b.classList.remove('active'));
+                        tabContents.forEach(c => c.classList.remove('active'));
+                        btn.classList.add('active');
+                        const tabId = `${btn.dataset.tab}-tab`;
+                        const tabContent = document.getElementById(tabId);
+                        if (tabContent) tabContent.classList.add('active');
+                        
+                        if (btn.dataset.tab === 'users') {
+                            loadUsers();
+                        }
+                    });
+                });
+            }
+
+            // === Модальные окна: закрытие ===
+            const closeModalElements = [closeModalBtn, closeEditModal, cancelEditBtn, closeEditUserModal, cancelUserEditBtn, closeAnalysisModal];
+            closeModalElements.forEach(el => {
+                if (el) {
+                    el.addEventListener('click', () => {
+                        if (caseModal) caseModal.style.display = 'none';
+                        if (editCaseModal) editCaseModal.style.display = 'none';
+                        if (editUserModal) editUserModal.style.display = 'none';
+                        if (analysisModal) analysisModal.style.display = 'none';
+                    });
+                }
+            });
+
+            if (window) {
+                window.addEventListener('click', (e) => {
+                    if (e.target === caseModal && caseModal) caseModal.style.display = 'none';
+                    if (e.target === editCaseModal && editCaseModal) editCaseModal.style.display = 'none';
+                    if (e.target === editUserModal && editUserModal) editUserModal.style.display = 'none';
+                    if (e.target === analysisModal && analysisModal) analysisModal.style.display = 'none';
+                });
+            }
+
+            // === Функции ===
+            async function loadInitialStats() {
+                try {
+                    const response = await fetch('http://localhost:8000/api/tournament/stats');
+                    const data = await response.json();
+                    if (response.ok) {
+                        if (document.getElementById('usersCount')) document.getElementById('usersCount').textContent = data.users || 0;
+                        if (document.getElementById('roomsCount')) document.getElementById('roomsCount').textContent = data.rooms || 0;
+                        if (document.getElementById('slotsCount')) document.getElementById('slotsCount').textContent = data.slots || 0;
+                        if (document.getElementById('casesCount')) document.getElementById('casesCount').textContent = data.cases || 0;
+                    }
+                } catch (error) {
+                    console.error('Ошибка загрузки статистики:', error);
+                }
+            }
+
+            async function loadRooms() {
+                try {
+                    const response = await fetch('http://localhost:8000/api/tournament/rooms');
+                    if (!response.ok) throw new Error('Ошибка загрузки комнат');
+                    const rooms = await response.json();
+                    if (roomSelect) {
+                        roomSelect.innerHTML = '<option value="">-- Выберите комнату --</option>';
+                        rooms.forEach(room => {
+                            const option = document.createElement('option');
+                            option.value = room.id;
+                            option.textContent = `${room.name} (${room.url})`;
+                            roomSelect.appendChild(option);
+                        });
+                    }
+                } catch (error) {
+                    console.error('Ошибка загрузки комнат:', error);
+                    if (roomSelect) roomSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+                }
+            }
+
+            async function loadSchedule() {
+                const roomId = roomSelect ? roomSelect.value : '';
+                const date = datePicker ? datePicker.value : '';
+                if (!roomId || !date) return;
+
+                if (scheduleList) scheduleList.innerHTML = '<div class="schedule-loading">Загрузка расписания...</div>';
+
+                try {
+                    const response = await fetch(
+                        `http://localhost:8000/api/tournament/room/${roomId}/schedule?date=${date}`
+                    );
+                    if (!response.ok) throw new Error(await response.json().detail || 'Ошибка');
+
+                    const slots = await response.json();
+                    if (slots.length === 0 && scheduleList) {
+                        scheduleList.innerHTML = '<div class="no-slots">Слоты не найдены</div>';
+                        return;
+                    }
+
+                    if (scheduleList) {
+                        scheduleList.innerHTML = '';
+                        slots.forEach(slot => {
+                            const startTime = new Date(slot.start_time);
+                            const endTime = new Date(slot.end_time);
+                            const timeStr = `${startTime.getHours().toString().padStart(2, '0')}:${startTime.getMinutes().toString().padStart(2, '0')} - ${endTime.getHours().toString().padStart(2, '0')}:${endTime.getMinutes().toString().padStart(2, '0')}`;
+                            
+                            const item = document.createElement('div');
+                            item.className = 'schedule-item';
+                            
+                            // Создаем HTML с новыми ссылками
+                            item.innerHTML = `
+                                <div data-label="Время:">${timeStr}</div>
+                                <div data-label="Статус:">
+                                    <span class="${getStatusClass(slot.status)}">${getStatusText(slot.status)}</span>
+                                </div>
+                                <div data-label="Игрок 1:">${slot.player1 || '-'}</div>
+                                <div data-label="Игрок 2:">${slot.player2 || '-'}</div>
+                                <div data-label="Кейс:">
+                                    ${slot.case_title ? 
+                                        `<a href="#" class="case-link" data-case-title="${slot.case_title}" data-case-content="${slot.case_content || 'Нет описания'}">${slot.case_title}</a>` : 
+                                        '-'}
+                                </div>
+                                <div data-label="Анализ и транскрипция:">
+                                    ${slot.player1_analysis ? `<a href="#" class="analysis-link" data-slot-id="${slot.id}">Анализ 1</a>` : ''}
+                                    ${slot.player2_analysis ? `<a href="#" class="analysis-link" data-slot-id="${slot.id}">Анализ 2</a>` : ''}
+                                    ${slot.transcription ? `<a href="#" class="transcription-link" data-slot-id="${slot.id}">Транскрипция</a>` : ''}
+                                    ${!slot.player1_analysis && !slot.player2_analysis && !slot.transcription ? '-' : ''}
+                                </div>
+                            `;
+                            scheduleList.appendChild(item);
+                        });
+
+                        // Обработчики для кейсов
+                        document.querySelectorAll('.case-link').forEach(link => {
+                            link.addEventListener('click', e => {
+                                e.preventDefault();
+                                showCaseModal(
+                                    link.getAttribute('data-case-title'),
+                                    link.getAttribute('data-case-content')
+                                );
+                            });
+                        });
+
+                        // Обработчики для анализа и транскрипции
+                        document.querySelectorAll('.analysis-link, .transcription-link').forEach(link => {
+                            link.addEventListener('click', e => {
+                                e.preventDefault();
+                                const slotId = link.getAttribute('data-slot-id');
+                                const slotData = slots.find(s => s.id == slotId);
+                                if (slotData) {
+                                    showAnalysisModal(slotData);
+                                }
+                            });
+                        });
+                    }
+                } catch (error) {
+                    if (scheduleList) scheduleList.innerHTML = `<div class="schedule-error">${error.message}</div>`;
+                }
+            }
+
+            function getStatusClass(status) {
+                switch(status) {
+                    case 'SCHEDULED': return 'status-scheduled';
+                    case 'CONFIRMED': return 'status-confirmed';
+                    case 'RESERVE': return 'status-reserve';
+                    case 'CANCELED': return 'status-canceled';
+                    case 'SEARCHING': return 'status-searching';
+                    default: return 'status-free';
+                }
+            }
+
+            function getStatusText(status) {
+                switch(status) {
+                    case 'SCHEDULED': return 'Запланирован';
+                    case 'CONFIRMED': return 'Подтверждён';
+                    case 'RESERVE': return 'Резерв';
+                    case 'CANCELED': return 'Отменён';
+                    case 'SEARCHING': return 'Поиск';
+                    default: return 'Свободен';
+                }
+            }
+
+            function showCaseModal(title, content) {
+                if (modalCaseTitle) modalCaseTitle.textContent = title;
+                if (modalCaseContent) modalCaseContent.textContent = content;
+                if (caseModal) caseModal.style.display = 'block';
+            }
+
+            function showAnalysisModal(slotData) {
+                const modal = document.getElementById('analysisModal');
+                const title = document.getElementById('analysisModalTitle');
+                const player1Analysis = document.getElementById('player1AnalysisText');
+                const player2Analysis = document.getElementById('player2AnalysisText');
+                const transcription = document.getElementById('transcriptionText');
+                
+                if (title) title.textContent = `Анализ встречи - ${new Date(slotData.start_time).toLocaleString()}`;
+                if (player1Analysis) player1Analysis.textContent = slotData.player1_analysis || 'Анализ отсутствует';
+                if (player2Analysis) player2Analysis.textContent = slotData.player2_analysis || 'Анализ отсутствует';
+                if (transcription) transcription.textContent = slotData.transcription || 'Транскрипция отсутствует';
+                
+                // Сбрасываем вкладки к первой
+                document.querySelectorAll('.analysis-tab-btn').forEach(btn => btn.classList.remove('active'));
+                document.querySelectorAll('.analysis-tab-content').forEach(content => content.classList.remove('active'));
+                
+                document.querySelector('.analysis-tab-btn[data-tab="player1"]').classList.add('active');
+                document.getElementById('player1Analysis').classList.add('active');
+                
+                if (modal) modal.style.display = 'block';
+            }
+
+            function setupAnalysisTabs() {
+                document.querySelectorAll('.analysis-tab-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const tabId = btn.dataset.tab;
+                        
+                        // Деактивируем все кнопки и контент
+                        document.querySelectorAll('.analysis-tab-btn').forEach(b => b.classList.remove('active'));
+                        document.querySelectorAll('.analysis-tab-content').forEach(c => c.classList.remove('active'));
+                        
+                        // Активируем выбранную
+                        btn.classList.add('active');
+                        document.getElementById(tabId === 'player1' ? 'player1Analysis' : 
+                                              tabId === 'player2' ? 'player2Analysis' : 'transcriptionContent')
+                            .classList.add('active');
+                    });
+                });
+            }
+
+            // === Планирование ===
+            async function startScheduling() {
+                const startDate = document.getElementById('scheduleStartDatePicker').value;
+                const endDate = document.getElementById('scheduleEndDatePicker').value;
+                const eliminationMode = document.querySelector('input[name="eliminationMode"]:checked').value === 'true';
+                
+                if (!startDate || !endDate) {
+                    statusDiv.innerHTML = '<span class="error">Выберите начальную и конечную дату</span>';
+                    statusDiv.classList.add('error');
+                    return;
+                }
+                
+                startBtn.disabled = true;
+                startBtn.innerHTML = '<span class="loading"></span> Планирование...';
+                
+                statusDiv.innerHTML = `Запуск планирования с ${startDate} по ${endDate}...`;
+                statusDiv.className = 'status';
+
+                try {
+                    const response = await fetch('http://localhost:8000/api/tournament/schedule', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            start_date: startDate, 
+                            end_date: endDate,
+                            elimination: eliminationMode
+                        })
+                    });
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        statusDiv.innerHTML = `<span class="success">✓ ${data.message}</span>`;
+                        statusDiv.classList.add('success');
+                        // Обновляем статистику
+                        if (document.getElementById('usersCount')) document.getElementById('usersCount').textContent = data.stats.users || 0;
+                        if (document.getElementById('roomsCount')) document.getElementById('roomsCount').textContent = data.stats.rooms || 0;
+                        if (document.getElementById('slotsCount')) document.getElementById('slotsCount').textContent = data.stats.slots || 0;
+                        if (document.getElementById('casesCount')) document.getElementById('casesCount').textContent = data.stats.cases || 0;
+                    } else {
+                        throw new Error(data.detail || 'Ошибка');
+                    }
+                } catch (error) {
+                    statusDiv.innerHTML = `<span class="error">✗ ${error.message}</span>`;
+                    statusDiv.classList.add('error');
+                } finally {
+                    startBtn.disabled = false;
+                    startBtn.innerHTML = 'Запланировать';
+                }
+            }
+
+            async function deleteSlots() {
+                // Используем scheduleStartDatePicker вместо scheduleDatePicker
+                const scheduleStartDatePicker = document.getElementById('scheduleStartDatePicker');
+                if (!deleteSlotsBtn || !statusDiv || !scheduleStartDatePicker) return;
+                
+                const formattedDate = formatDateToDDMMYYYY(scheduleStartDatePicker.value);
+                if (!confirm(`Удалить все слоты на ${formattedDate}?`)) return;
+
+                deleteSlotsBtn.disabled = true;
+                deleteSlotsBtn.innerHTML = '<span class="loading"></span> Удаление...';
+
+                try {
+                    const selectedDate = scheduleStartDatePicker.value;
+                    const response = await fetch(`http://localhost:8000/api/tournament/slots/${selectedDate}`, {
+                        method: 'DELETE'
+                    });
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        statusDiv.innerHTML = `<span class="success">✓ ${data.message}</span>`;
+                        statusDiv.classList.add('success');
+                        loadInitialStats();
+                    } else {
+                        throw new Error(data.detail || 'Ошибка');
+                    }
+                } catch (error) {
+                    statusDiv.innerHTML = `<span class="error">✗ ${error.message}</span>`;
+                    statusDiv.classList.add('error');
+                } finally {
+                    deleteSlotsBtn.disabled = false;
+                    deleteSlotsBtn.innerHTML = 'Очистить слоты';
+                }
+            }
+
+            const resetCycleBtn = document.getElementById('resetCycleBtn');
+
+            async function resetCycle() {
+                if (!confirm('Вы уверены, что хотите начать новый цикл? Это сбросит счетчик матчей в цикле у всех пользователей.')) {
+                    return;
+                }
+
+                resetCycleBtn.disabled = true;
+                resetCycleBtn.innerHTML = '<span class="loading"></span> Сброс...';
+
+                try {
+                    const response = await fetch('http://localhost:8000/api/tournament/reset-cycle', {
+                        method: 'POST'
+                    });
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        statusDiv.innerHTML = `<span class="success">✓ ${data.message}</span>`;
+                        statusDiv.classList.add('success');
+                    } else {
+                        throw new Error(data.detail || 'Ошибка');
+                    }
+                } catch (error) {
+                    statusDiv.innerHTML = `<span class="error">✗ ${error.message}</span>`;
+                    statusDiv.classList.add('error');
+                } finally {
+                    resetCycleBtn.disabled = false;
+                    resetCycleBtn.innerHTML = 'Новый цикл';
+                }
+            }
+
+            if (resetCycleBtn) {
+                resetCycleBtn.addEventListener('click', resetCycle);
+            }
+
+            // === Кейсы ===
+            async function uploadCasesFile() {
+                if (!uploadCasesBtn || !casesStatusDiv || !casesFileInput) return;
+                
+                if (!casesFileInput.files.length) {
+                    casesStatusDiv.innerHTML = '<span class="error">Выберите файл</span>';
+                    casesStatusDiv.classList.add('error');
+                    return;
+                }
+
+                uploadCasesBtn.disabled = true;
+                uploadCasesBtn.innerHTML = '<span class="loading"></span> Загрузка...';
+                casesStatusDiv.innerHTML = 'Обработка...';
+                casesStatusDiv.className = 'status';
+
+                const formData = new FormData();
+                formData.append('file', casesFileInput.files[0]);
+
+                try {
+                    const response = await fetch('http://localhost:8000/api/cases/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        casesStatusDiv.innerHTML = `<span class="success">✓ ${data.message}</span>`;
+                        casesStatusDiv.classList.add('success');
+                        currentPage = 1;
+                        loadCases();
+                    } else {
+                        throw new Error(data.detail || 'Ошибка');
+                    }
+                } catch (error) {
+                    casesStatusDiv.innerHTML = `<span class="error">✗ ${error.message}</span>`;
+                    casesStatusDiv.classList.add('error');
+                } finally {
+                    uploadCasesBtn.disabled = false;
+                    uploadCasesBtn.innerHTML = 'Загрузить и распарсить';
+                    casesFileInput.value = '';
+                }
+            }
+
+            async function addManualCase() {
+                if (!addManualCaseBtn || !manualCaseStatusDiv || !caseTitleInput || !caseContentInput) return;
+                
+                const title = caseTitleInput.value.trim();
+                const content = caseContentInput.value.trim();
+                const roles = caseRolesInput ? caseRolesInput.value.trim() : '';
+
+                if (!title || !content) {
+                    manualCaseStatusDiv.innerHTML = '<span class="error">Заполните название и содержание</span>';
+                    manualCaseStatusDiv.classList.add('error');
+                    return;
+                }
+
+                addManualCaseBtn.disabled = true;
+                addManualCaseBtn.innerHTML = '<span class="loading"></span> Добавление...';
+                manualCaseStatusDiv.innerHTML = 'Добавление...';
+                manualCaseStatusDiv.className = 'status';
+
+                try {
+                    const response = await fetch('http://localhost:8000/api/cases/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ title, content, roles })
+                    });
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        manualCaseStatusDiv.innerHTML = `<span class="success">✓ ${data.message}</span>`;
+                        manualCaseStatusDiv.classList.add('success');
+                        caseTitleInput.value = '';
+                        caseContentInput.value = '';
+                        if (caseRolesInput) caseRolesInput.value = '';
+                        currentPage = 1;
+                        loadCases();
+                    } else {
+                        throw new Error(data.detail || 'Ошибка');
+                    }
+                } catch (error) {
+                    manualCaseStatusDiv.innerHTML = `<span class="error">✗ ${error.message}</span>`;
+                    manualCaseStatusDiv.classList.add('error');
+                } finally {
+                    addManualCaseBtn.disabled = false;
+                    addManualCaseBtn.innerHTML = 'Добавить кейс';
+                }
+            }
+
+            // Функция для обновления иконок сортировки
+            function updateSortIcons() {
+                const headers = document.querySelectorAll('.cases-table th.sortable');
+                headers.forEach(header => {
+                    const icon = header.querySelector('.sort-icon');
+                    if (header.dataset.sort === currentCasesSortBy) {
+                        icon.textContent = currentCasesSortOrder === 'asc' ? ' ↑' : ' ↓';
+                    } else {
+                        icon.textContent = '';
+                    }
+                });
+            }
+
+            // Функция для настройки обработчиков сортировки
+            function setupCasesTableSorting() {
+                const headers = document.querySelectorAll('.cases-table th.sortable');
+                headers.forEach(header => {
+                    header.addEventListener('click', () => {
+                        const sortBy = header.dataset.sort;
+                        if (currentCasesSortBy === sortBy) {
+                            // Меняем порядок сортировки
+                            currentCasesSortOrder = currentCasesSortOrder === 'asc' ? 'desc' : 'asc';
+                        } else {
+                            currentCasesSortBy = sortBy;
+                            currentCasesSortOrder = 'desc';
+                        }
+                        updateSortIcons();
+                        loadCases();
+                    });
+                });
+            }
+
+            async function loadCases() {
+                if (!casesLoading || !casesContainer) return;
+                
+                casesLoading.style.display = 'block';
+                casesContainer.innerHTML = '';
+                let url = `http://localhost:8000/api/cases/?page=${currentPage}&per_page=${casesPerPage}&sort_by=${currentCasesSortBy}&sort_order=${currentCasesSortOrder}`;
+                if (currentSearch) url += `&search=${encodeURIComponent(currentSearch)}`;
+
+                try {
+                    const response = await fetch(url);
+                    const data = await response.json();
+
+                    if (response.ok && data.cases && data.cases.length > 0) {
+                        casesLoading.style.display = 'none';
+                        data.cases.forEach(caseItem => {
+                            const row = document.createElement('tr');
+                            row.className = caseItem.is_active ? '' : 'inactive';
+                            row.innerHTML = `
+                                <td>${caseItem.title}</td>
+                                <td>${caseItem.content.substring(0, 150)}...</td>
+                                <td>${caseItem.roles ? caseItem.roles.substring(0, 100) + '...' : '-'}</td>
+                                <td>${new Date(caseItem.created_at).toLocaleDateString()}</td>
+                                <td>
+                                    <span class="status-badge ${caseItem.is_active ? 'active' : 'inactive'}">
+                                        ${caseItem.is_active ? 'Активен' : 'Неактивен'}
+                                    </span>
+                                </td>
+                                <td>
+                                    <div class="case-actions">
+                                        <button class="btn btn-small edit-case" data-id="${caseItem.id}">Редактировать</button>
+                                        <button class="btn btn-small toggle-case" data-id="${caseItem.id}">
+                                            ${caseItem.is_active ? 'Деактивировать' : 'Активировать'}
+                                        </button>
+                                        <button class="btn btn-small btn-danger delete-case" data-id="${caseItem.id}">Удалить</button>
+                                    </div>
+                                </td>
+                            `;
+                            casesContainer.appendChild(row);
+                        });
+
+                        totalPages = data.total_pages;
+                        if (pageInfo) pageInfo.textContent = `Страница ${currentPage} из ${totalPages}`;
+                        if (prevPageBtn) prevPageBtn.disabled = currentPage === 1;
+                        if (nextPageBtn) nextPageBtn.disabled = currentPage === totalPages;
+                        if (document.getElementById('pagination')) document.getElementById('pagination').style.display = 'flex';
+
+                        // Обработчики действий
+                        document.querySelectorAll('.delete-case').forEach(btn => {
+                            btn.addEventListener('click', () => deleteCase(btn.dataset.id));
+                        });
+
+                        document.querySelectorAll('.toggle-case').forEach(btn => {
+                            btn.addEventListener('click', () => toggleCase(btn.dataset.id));
+                        });
+
+                        document.querySelectorAll('.edit-case').forEach(btn => {
+                            btn.addEventListener('click', async () => {
+                                const caseId = btn.dataset.id;
+                                const response = await fetch(`http://localhost:8000/api/cases/${caseId}`);
+                                if (response.ok) {
+                                    const caseData = await response.json();
+                                    openEditCaseModal(caseData);
+                                } else {
+                                    alert('Ошибка загрузки кейса');
+                                }
+                            });
+                        });
+                    } else {
+                        casesLoading.innerHTML = currentSearch ? 'Кейсы не найдены' : 'Кейсы отсутствуют';
+                        if (document.getElementById('pagination')) document.getElementById('pagination').style.display = 'none';
+                    }
+                } catch (error) {
+                    casesLoading.innerHTML = 'Ошибка загрузки кейсов';
+                }
+            }
+
+            async function deleteCase(caseId) {
+                if (!confirm('Удалить кейс?')) return;
+                try {
+                    const response = await fetch(`http://localhost:8000/api/cases/${caseId}`, { method: 'DELETE' });
+                    const data = await response.json();
+                    if (response.ok && casesStatusDiv) {
+                        casesStatusDiv.innerHTML = `<span class="success">✓ ${data.message}</span>`;
+                        casesStatusDiv.classList.add('success');
+                        loadCases();
+                    } else {
+                        throw new Error(data.detail || 'Ошибка');
+                    }
+                } catch (error) {
+                    if (casesStatusDiv) {
+                        casesStatusDiv.innerHTML = `<span class="error">✗ ${error.message}</span>`;
+                        casesStatusDiv.classList.add('error');
+                    }
+                }
+            }
+
+            async function toggleCase(caseId) {
+                try {
+                    const response = await fetch(`http://localhost:8000/api/cases/${caseId}/toggle`, { method: 'PUT' });
+                    const data = await response.json();
+                    if (response.ok && casesStatusDiv) {
+                        casesStatusDiv.innerHTML = `<span class="success">✓ ${data.message}</span>`;
+                        casesStatusDiv.classList.add('success');
+                        loadCases();
+                    } else {
+                        throw new Error(data.detail || 'Ошибка');
+                    }
+                } catch (error) {
+                    if (casesStatusDiv) {
+                        casesStatusDiv.innerHTML = `<span class="error">✗ ${error.message}</span>`;
+                        casesStatusDiv.classList.add('error');
+                    }
+                }
+            }
+
+            function openEditCaseModal(caseItem) {
+                if (!editCaseModal || !document.getElementById('editCaseId')) return;
+                
+                document.getElementById('editCaseId').value = caseItem.id;
+                document.getElementById('editCaseTitle').value = caseItem.title;
+                document.getElementById('editCaseContent').value = caseItem.content;
+                document.getElementById('editCaseRoles').value = caseItem.roles || '';
+                document.getElementById('editCaseActive').checked = caseItem.is_active;
+                if (editCaseStatusDiv) editCaseStatusDiv.innerHTML = '';
+                editCaseModal.style.display = 'block';
+            }
+
+            async function saveCaseChanges() {
+                if (!saveCaseBtn || !editCaseStatusDiv) return;
+                
+                const caseId = document.getElementById('editCaseId').value;
+                const title = document.getElementById('editCaseTitle').value.trim();
+                const content = document.getElementById('editCaseContent').value.trim();
+                const roles = document.getElementById('editCaseRoles').value.trim();
+                const isActive = document.getElementById('editCaseActive').checked;
+
+                if (!title || !content) {
+                    editCaseStatusDiv.innerHTML = '<span class="error">Заполните обязательные поля</span>';
+                    return;
+                }
+
+                saveCaseBtn.disabled = true;
+                saveCaseBtn.innerHTML = '<span class="loading"></span> Сохранение...';
+
+                try {
+                    const response = await fetch(`http://localhost:8000/api/cases/${caseId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ title, content, roles, is_active: isActive })
+                    });
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        editCaseStatusDiv.innerHTML = `<span class="success">✓ ${data.message}</span>`;
+                        setTimeout(() => {
+                            editCaseModal.style.display = 'none';
+                            loadCases();
+                        }, 1000);
+                    } else {
+                        throw new Error(data.detail || 'Ошибка');
+                    }
+                } catch (error) {
+                    editCaseStatusDiv.innerHTML = `<span class="error">✗ ${error.message}</span>`;
+                } finally {
+                    saveCaseBtn.disabled = false;
+                    saveCaseBtn.innerHTML = 'Сохранить';
+                }
+            }
+
+            // === Функции для сортировки пользователей ===
+            function updateUsersSortIcons() {
+                const headers = document.querySelectorAll('.users-header .sortable');
+                headers.forEach(header => {
+                    const icon = header.querySelector('.sort-icon');
+                    if (header.dataset.sort === currentUsersSortBy) {
+                        icon.textContent = currentUsersSortOrder === 'asc' ? ' ↑' : ' ↓';
+                    } else {
+                        icon.textContent = '';
+                    }
+                });
+            }
+
+            function setupUsersTableSorting() {
+                const headers = document.querySelectorAll('.users-header .sortable');
+                headers.forEach(header => {
+                    header.addEventListener('click', () => {
+                        const sortBy = header.dataset.sort;
+                        if (currentUsersSortBy === sortBy) {
+                            // Меняем порядок сортировки
+                            currentUsersSortOrder = currentUsersSortOrder === 'asc' ? 'desc' : 'asc';
+                        } else {
+                            currentUsersSortBy = sortBy;
+                            currentUsersSortOrder = 'asc';
+                        }
+                        updateUsersSortIcons();
+                        loadUsers();
+                    });
+                });
+            }
+
+            // === Пользователи ===
+            // Добавляем переменную для состояния фильтра
+            let hideEliminated = true;
+
+            // Обновляем функцию loadUsers для учета фильтра
+            async function loadUsers() {
+                if (!usersLoading || !usersListContent) return;
+                
+                usersLoading.style.display = 'block';
+                usersListContent.innerHTML = '';
+                
+                let url = `http://localhost:8000/api/users/?skip=${(currentUsersPage - 1) * usersPerPage}&limit=${usersPerPage}&sort_by=${currentUsersSortBy}&order=${currentUsersSortOrder}`;
+                if (currentUsersSearch) url += `&search=${encodeURIComponent(currentUsersSearch)}`;
+                // Добавляем параметр фильтрации
+                if (hideEliminated) url += `&hide_eliminated=true`;
+
+                try {
+                    const response = await fetch(url);
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => null);
+                        throw new Error(errorData?.detail || `HTTP error ${response.status}`);
+                    }
+                    
+                    const users = await response.json();
+
+                    if (users && users.length > 0) {
+                        usersLoading.style.display = 'none';
+                        
+                        users.forEach(user => {
+                            const userElement = document.createElement('div');
+                            userElement.className = 'user-item';
+                            userElement.innerHTML = `
+                                <div data-label="ID">${user.id}</div>
+                                <div data-label="Имя">${user.full_name || 'Не указано'}</div>
+                                <div data-label="Университет">${user.university || 'Не указано'}</div>
+                                <div data-label="Матчей">${user.matches_played || 0}</div>
+                                <div data-label="Побед">${user.wins_count || 0}</div>
+                                <div data-label="Баллы">${user.sum_points || 0}</div>
+                                <div data-label="Длина транскрипции">${user.total_transcription_length || 0}</div>
+                                <div data-label="Выбыл">
+                                    <span class="status-icon ${user.eliminated ? 'eliminated' : 'active'}" title="${user.eliminated ? 'Выбыл' : 'Активен'}">
+                                        ${user.eliminated ? '✓' : '✗'}
+                                    </span>
+                                </div>
+                                <div data-label="Действия">
+                                    <button class="btn btn-small edit-user" data-id="${user.id}">Редактировать</button>
+                                </div>
+                            `;
+                            usersListContent.appendChild(userElement);
+                        });
+
+                        // Обновляем пагинацию
+                        let countUrl = 'http://localhost:8000/api/users/stats/count';
+                        if (hideEliminated) countUrl += '?hide_eliminated=true';
+                        
+                        const countResponse = await fetch(countUrl);
+                        if (countResponse.ok) {
+                            const countData = await countResponse.json();
+                            totalUsersPages = Math.ceil(countData.total_users / usersPerPage);
+                            if (usersPageInfo) usersPageInfo.textContent = `Страница ${currentUsersPage} из ${totalUsersPages}`;
+                            if (prevUsersPageBtn) prevUsersPageBtn.disabled = currentUsersPage === 1;
+                            if (nextUsersPageBtn) nextUsersPageBtn.disabled = currentUsersPage === totalUsersPages;
+                            if (document.getElementById('usersPagination')) document.getElementById('usersPagination').style.display = 'flex';
+                        }
+
+                        // Обработчики для кнопок редактирования
+                        document.querySelectorAll('.edit-user').forEach(btn => {
+                            btn.addEventListener('click', async () => {
+                                const userId = btn.dataset.id;
+                                const response = await fetch(`http://localhost:8000/api/users/${userId}`);
+                                if (response.ok) {
+                                    const userData = await response.json();
+                                    openEditUserModal(userData);
+                                } else {
+                                    alert('Ошибка загрузки пользователя');
+                                }
+                            });
+                        });
+                    } else {
+                        usersLoading.innerHTML = 'Пользователи не найдены';
+                        if (document.getElementById('usersPagination')) document.getElementById('usersPagination').style.display = 'none';
+                    }
+                } catch (error) {
+                    usersLoading.innerHTML = `Ошибка загрузки: ${error.message}`;
+                    console.error('Ошибка загрузки пользователей:', error);
+                }
+            }
+            
+            function openEditUserModal(user) {
+                if (!editUserModal || !document.getElementById('editUserId')) return;
+                
+                document.getElementById('editUserId').value = user.id;
+                document.getElementById('editUserName').value = user.full_name || '';
+                document.getElementById('editUserUniversity').value = user.university || '';
+                document.getElementById('editUserMatchesPlayed').value = user.matches_played || 0;
+                document.getElementById('editUserWinsCount').value = user.wins_count || 0;
+                document.getElementById('editUserSumPoints').value = user.sum_points || 0;
+                document.getElementById('editUserTotalTranscriptionLength').value = user.total_transcription_length || 0;
+                document.getElementById('editUserTimePreference').value = user.time_preference || '';
+                document.getElementById('editUserRegistered').checked = user.registered || false;
+                document.getElementById('editUserEliminated').checked = user.eliminated || false;
+                
+                if (editUserStatusDiv) editUserStatusDiv.innerHTML = '';
+                editUserModal.style.display = 'block';
+            }
+
+
+            async function saveUserChanges() {
+                if (!saveUserBtn || !editUserStatusDiv) return;
+                
+                const userId = document.getElementById('editUserId').value;
+                const name = document.getElementById('editUserName').value.trim();
+                const university = document.getElementById('editUserUniversity').value.trim();
+                const matchesPlayed = parseInt(document.getElementById('editUserMatchesPlayed').value) || 0;
+                const winsCount = parseInt(document.getElementById('editUserWinsCount').value) || 0;
+                const sumPoints = parseInt(document.getElementById('editUserSumPoints').value) || 0;
+                const totalTranscriptionLength = parseInt(document.getElementById('editUserTotalTranscriptionLength').value) || 0;
+                const timePreference = document.getElementById('editUserTimePreference').value;
+                const registered = document.getElementById('editUserRegistered').checked;
+                const eliminated = document.getElementById('editUserEliminated').checked;
+
+                const updateData = {
+                    full_name: name,
+                    university: university,
+                    matches_played: matchesPlayed,
+                    wins_count: winsCount,
+                    sum_points: sumPoints,
+                    total_transcription_length: totalTranscriptionLength,
+                    registered: registered,
+                    eliminated: eliminated
+                };
+
+                if (timePreference !== "") {
+                    updateData.time_preference = timePreference;
+                }
+
+
+                saveUserBtn.disabled = true;
+                saveUserBtn.innerHTML = '<span class="loading"></span> Сохранение...';
+
+                try {
+                    const response = await fetch(`http://localhost:8000/api/users/${userId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(updateData)
+                    });
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        editUserStatusDiv.innerHTML = `<span class="success">✓ Пользователь успешно обновлен</span>`;
+                        setTimeout(() => {
+                            editUserModal.style.display = 'none';
+                            loadUsers();
+                        }, 1000);
+                    } else {
+                        throw new Error(data.detail || 'Ошибка обновления пользователя');
+                    }
+                } catch (error) {
+                    editUserStatusDiv.innerHTML = `<span class="error">✗ ${error.message}</span>`;
+                } finally {
+                    saveUserBtn.disabled = false;
+                    saveUserBtn.innerHTML = 'Сохранить';
+                }
+            }
+
+            // === Обработчики событий ===
+            if (startBtn) startBtn.addEventListener('click', startScheduling);
+            if (deleteSlotsBtn) deleteSlotsBtn.addEventListener('click', deleteSlots);
+            if (reserveScheduleBtn) reserveScheduleBtn.addEventListener('click', startReserveScheduling);
+            if (uploadCasesBtn) uploadCasesBtn.addEventListener('click', uploadCasesFile);
+            if (addManualCaseBtn) addManualCaseBtn.addEventListener('click', addManualCase);
+            if (saveCaseBtn) saveCaseBtn.addEventListener('click', saveCaseChanges);
+            if (saveUserBtn) saveUserBtn.addEventListener('click', saveUserChanges);
+            if (roomSelect) roomSelect.addEventListener('change', loadSchedule);
+            if (datePicker) datePicker.addEventListener('change', loadSchedule);
+
+            if (searchCasesBtn) {
+                searchCasesBtn.addEventListener('click', () => {
+                    currentSearch = caseSearchInput ? caseSearchInput.value.trim() : '';
+                    currentPage = 1;
+                    loadCases();
+                });
+            }
+
+            if (clearSearchBtn) {
+                clearSearchBtn.addEventListener('click', () => {
+                    if (caseSearchInput) caseSearchInput.value = '';
+                    currentSearch = '';
+                    currentPage = 1;
+                    loadCases();
+                });
+            }
+            
+            const hideEliminatedCheckbox = document.getElementById('hideEliminatedCheckbox');
+            
+            if (hideEliminatedCheckbox) {
+                hideEliminatedCheckbox.addEventListener('change', function() {
+                    hideEliminated = this.checked;
+                    currentUsersPage = 1;
+                    loadUsers();
+                });
+            }
+            
+            if (searchUsersBtn) {
+                searchUsersBtn.addEventListener('click', () => {
+                    currentUsersSearch = userSearchInput ? userSearchInput.value.trim() : '';
+                    currentUsersPage = 1;
+                    loadUsers();
+                });
+            }
+
+            if (clearUserSearchBtn) {
+                clearUserSearchBtn.addEventListener('click', () => {
+                    if (userSearchInput) userSearchInput.value = '';
+                    currentUsersSearch = '';
+                    currentUsersPage = 1;
+                    loadUsers();
+                });
+            }
+
+            if (prevPageBtn) {
+                prevPageBtn.addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadCases(); } });
+            }
+
+            if (nextPageBtn) {
+                nextPageBtn.addEventListener('click', () => { if (currentPage < totalPages) { currentPage++; loadCases(); } });
+            }
+
+            if (prevUsersPageBtn) {
+                prevUsersPageBtn.addEventListener('click', () => { if (currentUsersPage > 1) { currentUsersPage--; loadUsers(); } });
+            }
+
+            if (nextUsersPageBtn) {
+                nextUsersPageBtn.addEventListener('click', () => { if (currentUsersPage < totalUsersPages) { currentUsersPage++; loadUsers(); } });
+            }
+
+            // === Инициализация ===
+            loadInitialStats();
+            loadRooms();
+            loadCases();
+            setupCasesTableSorting();
+            updateSortIcons();
+            setupUsersTableSorting();
+            updateUsersSortIcons();
+            setupAnalysisTabs();
+        });
+    </script>
+</body>
+</html>
