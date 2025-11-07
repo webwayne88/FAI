@@ -9,13 +9,13 @@ from db.models import User
 from bot.handlers import register_handlers
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot.scheduler import schedule_matches, process_pending_matches
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from bot.bot import bot, dp
 
 async def scheduled_task():
     """Задача для планирования матчей"""
     try:
-        target_date = datetime.now() + timedelta(days=1)
+        target_date = datetime.now(timezone.utc) + timedelta(days=1)
         await schedule_matches(target_date)
     except Exception as e:
         logging.error(f"Ошибка при планировании матчей: {e}")

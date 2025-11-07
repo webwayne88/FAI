@@ -20,7 +20,20 @@ from bot.matchmaking import process_completed_match
 from bot.bot import bot
 from salute.jazz import SaluteJazzAPI
 from salute.giga import analyze_winner
-from config import BOT_TOKEN, SDK_KEY_ENCODED, PERIODS, RATING_THRESHOLD, REFRESH_CHECK_PERIOD, INVITATION_TIMEOUT, slot_duration_minutes
+from config import (
+    BOT_TOKEN,
+    SDK_KEY_ENCODED,
+    PERIODS,
+    RATING_THRESHOLD,
+    REFRESH_CHECK_PERIOD,
+    INVITATION_TIMEOUT,
+    slot_duration_minutes,
+    TOURNAMENT_SLOT_STARTS_MSK,
+    DEFAULT_ROOM_COUNT,
+    MOSCOW_TZ,
+    UTC_TZ,
+)
+from common.time_utils import as_utc_naive, ensure_utc, format_moscow
 
 async def schedule_matches(target_date: datetime, elimination=True):
     async with async_session() as session:
@@ -49,11 +62,12 @@ async def schedule_matches(target_date: datetime, elimination=True):
 
         scheduled_count = 0
         for period, period_config in PERIODS.items():
-            period_start = datetime.combine(target_date.date(), period_config['start'])
-            period_end = datetime.combine(target_date.date(), period_config['end'])
+            period_start = as_utc_naive(datetime.combine(target_date.date(), period_config['start']))
+            period_end = as_utc_naive(datetime.combine(target_date.date(), period_config['end']))
+
             
             period_slots = [
-                slot for slot in room_slots 
+                slot for slot in room_slots
                 if period_start <= slot.start_time < period_end and not slot.is_occupied
             ]
             
@@ -79,8 +93,14 @@ async def schedule_matches(target_date: datetime, elimination=True):
                     
                     await notify_match_scheduled(player1, player2, slot)
                     scheduled_count += 1
-                    logging.info(f"Создан матч в периоде {period}: {player1.full_name} vs {player2.full_name} в {slot.start_time.strftime('%H:%M')} (комната {slot.room_id})")
-        
+                    logging.info(
+                        "Создан матч в периоде %s: %s vs %s в %s (комната %s)",
+                        period,
+                        player1.full_name,
+                        player2.full_name,
+                        format_moscow(slot.start_time, "%H:%M"),
+                        slot.room_id,
+                    )
         # Второй проход: заполняем оставшиеся слоты пользователями с ANYTIME
         # и пользователями из других периодов, у которых еще нет матча
         remaining_slots = [slot for slot in room_slots if not slot.is_occupied]
@@ -142,10 +162,9 @@ async def get_available_room_slots(session: AsyncSession, target_date: datetime)
     end_of_day = datetime.combine(target_date.date(), time.max)
     
     # Get the current time with the same date as the target date to ensure consistent filtering
-    now = datetime.now() + timedelta(seconds=INVITATION_TIMEOUT)
-    if target_date.date() == now.date():
-        # If the target date is today, only select slots in the future
-        filter_start_time = now
+    now_utc = ensure_utc(datetime.now(UTC_TZ)) + timedelta(seconds=INVITATION_TIMEOUT)
+    if target_date.date() == now_utc.date():
+        filter_start_time = as_utc_naive(now_utc)
     else:
         # Otherwise, select all slots from the beginning of the day
         filter_start_time = start_of_day
@@ -164,9 +183,9 @@ async def notify_match_scheduled(player1: User, player2: User, slot: RoomSlot):
     await send_confirmation_request(bot, player2, player1, slot)
 
 async def create_rooms_and_slots(
-    target_date: datetime, 
-    room_count: int = 4, 
-    slot_duration_minutes: int = 7
+    target_date: datetime,
+    room_count: int = DEFAULT_ROOM_COUNT,
+    slot_duration_minutes: int = slot_duration_minutes
 ):
     """
     Создает слоты времени для существующих комнат на основе периодов из конфига.
@@ -185,15 +204,20 @@ async def create_rooms_and_slots(
             select(Room).where(Room.is_active == True)
         )
         existing_rooms = result.scalars().all()
-        
-        # --- 2. Если комнат нет - создаем новые через API ---
-        if not existing_rooms:
-            logging.info("Активных комнат не найдено. Создаем новые комнаты через API.")
+
+        rooms_to_create = max(0, room_count - len(existing_rooms))
+
+        if rooms_to_create > 0:
+            logging.info(
+                "Необходимо создать %s дополнительных комнат Salute Jazz.",
+                rooms_to_create,
+            )
             rooms_list = []
             try:
-                for i in range(room_count):
-                    room_title = f"Room #{i+1}"
-                    logging.info(f"Создание комнаты: {room_title}")
+                for i in range(rooms_to_create):
+                    room_number = len(existing_rooms) + i + 1
+                    room_title = f"Room #{room_number}"
+                    logging.info("Создание комнаты: %s", room_title)
                     
                     room_data = await api.create_room(room_title)
                     
@@ -205,10 +229,10 @@ async def create_rooms_and_slots(
                     rooms_list.append(room_info)
                     await asyncio.sleep(1)
                     
-                logging.info(f"Успешно создано {len(rooms_list)} комнат через API.")
+                logging.info("Успешно создано %s комнат через API.", len(rooms_list))
 
-            except Exception as e:
-                logging.exception("Ошибка при создании комнат через API:")
+            except Exception:
+                logging.exception("Ошибка при создании комнат через API")
                 return
 
             # --- 3. Сохраняем новые комнаты в БД ---
@@ -231,7 +255,10 @@ async def create_rooms_and_slots(
             )
             existing_rooms = result.scalars().all()
         else:
-            logging.info(f"Найдено {len(existing_rooms)} активных комнат в БД. Используем их для создания слотов.")
+            logging.info(
+                "Найдено %s активных комнат в БД. Используем их для создания слотов.",
+                len(existing_rooms),
+            )
 
         # --- 5. Создаем слоты для каждой существующей комнаты на основе периодов из конфига ---
         start_of_day = datetime.combine(target_date.date(), time.min)
@@ -256,30 +283,28 @@ async def create_rooms_and_slots(
             new_slots = []
             
             # Проходим по всем периодам из конфига
-            for period_name, period_config in PERIODS.items():
-                period_start = datetime.combine(target_date.date(), period_config['start'])
-                period_end = datetime.combine(target_date.date(), period_config['end'])
-                
-                logging.info(f"Создание слотов для периода {period_name}: {period_start.strftime('%H:%M')} - {period_end.strftime('%H:%M')}")
-                
-                # Генерируем слоты для этого периода
-                current_time = period_start
-                while current_time + timedelta(minutes=slot_duration_minutes) <= period_end:
-                    slot_end = current_time + timedelta(minutes=slot_duration_minutes)
-                    
-                    slot = RoomSlot(
-                        room_id=room.id,
-                        start_time=current_time,
-                        end_time=slot_end,
-                        is_occupied=False
-                    )
-                    new_slots.append(slot)
-                    current_time = slot_end
+            for slot_time in TOURNAMENT_SLOT_STARTS_MSK:
+                slot_start_msk = datetime.combine(target_date.date(), slot_time, tzinfo=MOSCOW_TZ)
+                slot_start_utc = slot_start_msk.astimezone(UTC_TZ)
+                slot_end_utc = slot_start_utc + timedelta(minutes=slot_duration_minutes)
+
+                slot = RoomSlot(
+                    room_id=room.id,
+                    start_time=slot_start_utc.replace(tzinfo=None),
+                    end_time=slot_end_utc.replace(tzinfo=None),
+                    is_occupied=False
+                )
+                new_slots.append(slot)
 
             # Сохраняем слоты в БД
             session.add_all(new_slots)
             await session.commit()
-            logging.info(f"Добавлено {len(new_slots)} новых слотов для комнаты {room.id} ({room.room_name}).")
+            logging.info(
+                "Добавлено %s новых слотов для комнаты %s (%s).",
+                len(new_slots),
+                room.id,
+                room.room_name,
+            )
 
     logging.info("Процесс создания слотов завершен.")
 
@@ -294,7 +319,10 @@ async def process_pending_matches():
                 # Находим матчи, которые завершились, но не обработаны
                 result = await session.execute(
                     select(RoomSlot)
-                    .where(RoomSlot.end_time < datetime.now() - timedelta(hours=2))
+                    .where(
+                        RoomSlot.end_time
+                        < as_utc_naive(ensure_utc(datetime.now(UTC_TZ)) - timedelta(hours=2))
+                    )
                     .where(RoomSlot.transcription_processed == False)
                     .where(RoomSlot.status == MatchStatus.CONFIRMED)
                     .options(selectinload(RoomSlot.player1), selectinload(RoomSlot.player2), selectinload(RoomSlot.room), selectinload(RoomSlot.case))

@@ -21,6 +21,7 @@ from bot.matchmaking import process_completed_match, send_match_results
 from salute.giga import change_case
 from salute.jazz import get_room_transcription, parse_transcriptions, api
 from config import INVITATION_TIMEOUT, CASE_READ_TIME, LINK_FOLLOW_TIME, analyze_time
+from common.time_utils import ensure_utc, format_moscow, to_moscow
 
 router = Router()
 
@@ -33,7 +34,7 @@ async def log_old_room_url(room_id: int, old_room_url: str, new_room_url: str):
     """Записывает старую ссылку на комнату в файл"""
     try:
         log_entry = {
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'room_id': room_id,
             'old_room_url': old_room_url,
             'new_room_url': new_room_url
@@ -55,8 +56,8 @@ async def send_confirmation_request(
     slot: RoomSlot
 ):
     """Отправляет запрос на подтверждение участия в матче"""
-    time_str = slot.start_time.strftime("%H:%M")
-    date_str = slot.start_time.strftime("%d.%m.%Y")
+    time_str = format_moscow(slot.start_time, "%H:%M")
+    date_str = format_moscow(slot.start_time, "%d.%m.%Y")
 
     message = (
         f"Ваш матч запланирован!\n\n"
@@ -142,8 +143,8 @@ async def notify_match_confirmed(
     case: Case = None
 ):
     """Уведомляет об успешном подтверждении матча"""
-    time_str = slot.start_time.strftime("%H:%M")
-    date_str = slot.start_time.strftime("%d.%m.%Y")
+    time_str = format_moscow(slot.start_time, "%H:%M")
+    date_str = format_moscow(slot.start_time, "%d.%m.%Y")
 
     message = (
         f"✅ Матч подтвержден!\n\n"
@@ -168,7 +169,7 @@ async def notify_opponent(
     try:
         await bot.send_message(
             chat_id=user.tg_id,
-            text=f"ℹ️ Информация по вашему матчу в {slot.start_time.strftime('%H:%M')}:\n{reason}"
+            text=f"ℹ️ Информация по вашему матчу в {format_moscow(slot.start_time, '%H:%M')}:\n{reason}"
         )
     except Exception as e:
         logging.error(f"Ошибка уведомления соперника {user.full_name}: {e}")
@@ -186,7 +187,7 @@ async def handle_cancellation(bot: Bot, slot: RoomSlot, canceling_user_id: int, 
             logging.info(f"Игрок {canceling_user.full_name} (ID: {canceling_user.id}) был исключен из-за отмены матча.")
             try:
                 message = (
-                    f"Ваш матч, запланированный на {slot.start_time.strftime('%d.%m.%Y %H:%M')}, отменен.\n"
+                    f"Ваш матч, запланированный на {format_moscow(slot.start_time, '%d.%m.%Y %H:%M')}, отменен.\n"
                     f"Причина: {canceling_user.full_name} {reason_for_opponent}.\n"
                     f"Этот участник выбывает из игры."
                 )
@@ -196,7 +197,7 @@ async def handle_cancellation(bot: Bot, slot: RoomSlot, canceling_user_id: int, 
     if remaining_user and remaining_user.tg_id:
         try:
             message = (
-                f"Ваш матч, запланированный на {slot.start_time.strftime('%d.%m.%Y %H:%M')}, отменен.\n"
+                f"Ваш матч, запланированный на {format_moscow(slot.start_time, '%d.%m.%Y %H:%M')}, отменен.\n"
                 f"Причина: Ваш соперник {canceling_user.full_name} {reason_for_opponent}.\n"
                 f"Соперник выбывает из игры."
             )
@@ -326,15 +327,17 @@ async def on_match_confirmed(bot: Bot, slot: RoomSlot, case: Case):
                 # Используем обновленный слот с загруженными связями
                 slot_with_relations = updated_slot
 
-        now = datetime.now()
-        
-        delay_until_case = max(0, (slot_with_relations.start_time - now).total_seconds() - CASE_READ_TIME)  
+        now = datetime.now(timezone.utc)
+        start_time_utc = ensure_utc(slot_with_relations.start_time)
+
+        delay_until_case = max(0, (start_time_utc - now).total_seconds() - CASE_READ_TIME)
+
         if delay_until_case <= 0:
             await send_personalized_case(bot, slot_with_relations.player1, slot_with_relations.player2, personalized_case)
         else:
             asyncio.create_task(send_case_before_match(bot, slot_with_relations.id, delay_until_case))
 
-        delay_until_link = max(0, (slot_with_relations.start_time - now).total_seconds() - LINK_FOLLOW_TIME)
+        delay_until_link = max(0, (start_time_utc - now).total_seconds() - LINK_FOLLOW_TIME)
         
         async def send_links_and_process():
             # Перезагружаем слот в новой сессии
@@ -395,7 +398,7 @@ async def process_match_after_completion(bot: Bot, slot: RoomSlot):
     """Обработка матча после его завершения"""
     try:
         # Ждем время окончания матча - 5 минут
-        wait_time = (slot.end_time - datetime.now()).total_seconds() - 5 * 60
+        wait_time = (ensure_utc(slot.end_time) - datetime.now(timezone.utc)).total_seconds() - 5 * 60
         if wait_time > 0:
             await asyncio.sleep(wait_time)
             
@@ -418,13 +421,13 @@ async def process_match_after_completion(bot: Bot, slot: RoomSlot):
             transcription_text = await get_room_transcription(updated_slot.room.room_url)
             await refresh_link(bot, updated_slot)
 
-            moscow_tz = timezone(timedelta(hours=3))
             parsed_transcription = parse_transcriptions(
-                transcription_text, 
-                [updated_slot.player1.full_name, updated_slot.player2.full_name], 
-                start_time=updated_slot.start_time.astimezone(moscow_tz), 
-                end_time=updated_slot.end_time.astimezone(moscow_tz) - timedelta(minutes=analyze_time)
+                transcription_text,
+                [updated_slot.player1.full_name, updated_slot.player2.full_name],
+                start_time=to_moscow(updated_slot.start_time),
+                end_time=to_moscow(updated_slot.end_time) - timedelta(minutes=analyze_time)
             )
+            
             await save_transcription(session, updated_slot.id, parsed_transcription)
 
             player1_connected = check_player_connection(parsed_transcription, updated_slot.player1.full_name)

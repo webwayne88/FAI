@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete  # Добавляем delete здесь
-from datetime import datetime, timedelta, date, time
+from datetime import datetime, timedelta, date, time, timezone
 from db.models import User, Room, RoomSlot, MatchStatus, Case, TimePreference
 from bot.scheduler import schedule_matches
 from db.database import get_db
@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import aliased, selectinload
 from typing import Optional
 from config import BOT_TOKEN
+from common.time_utils import to_moscow, as_utc_naive
 import asyncio
 import logging
 
@@ -92,11 +93,11 @@ async def run_scheduling(
         current_date = request.start_date
         
         while current_date <= request.end_date:
-            target_date = datetime.combine(current_date, time.min)
-            
+            target_date = datetime.combine(current_date, time.min).replace(tzinfo=timezone.utc)
+
             # Проверяем, есть ли уже матчи на эту дату
-            start_dt = target_date
-            end_dt = target_date + timedelta(days=1)
+            start_dt = as_utc_naive(target_date)
+            end_dt = as_utc_naive(target_date + timedelta(days=1))
             
             existing_count = await db.scalar(
                 select(func.count(RoomSlot.id))
@@ -105,16 +106,23 @@ async def run_scheduling(
                 .where(RoomSlot.player1_id.isnot(None))
             )
             
-            if existing_count and existing_count > 0:
-                # Пропускаем день, если уже есть матчи
-                current_date += timedelta(days=1)
+            available_count = await db.scalar(
+                select(func.count(RoomSlot.id))
+                .where(RoomSlot.start_time >= start_dt)
+                .where(RoomSlot.start_time < end_dt)
+                .where(RoomSlot.is_occupied == False)
+            )
+
+            if existing_count and existing_count > 0 and not available_count:
+                # Пропускаем час, если уже всё запланировано
+                current_date += timedelta(hours=1)
                 continue
             
             # Передаем параметр elimination в schedule_matches
             result = await schedule_matches(target_date, elimination=request.elimination)
             total_scheduled += result['scheduled_count']
             total_days += 1
-            current_date += timedelta(days=1)
+            current_date += timedelta(hours=1)
         
         stats = await get_stats_from_db(db)
         
@@ -200,8 +208,8 @@ async def get_room_schedule(
             
             slots.append({
                 "id": row.id,
-                "start_time": row.start_time,
-                "end_time": row.end_time,
+                "start_time": to_moscow(row.start_time).isoformat(),
+                "end_time": to_moscow(row.end_time).isoformat(),
                 "status": actual_status,
                 "player1": player1_info,
                 "player2": player2_info,
@@ -295,7 +303,7 @@ async def get_upcoming_matches(
 ):
     """Получает предстоящие матчи в указанном временном диапазоне"""
     try:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         end_time = now + timedelta(hours=hours)
         
         Player1 = aliased(User)
@@ -317,8 +325,8 @@ async def get_upcoming_matches(
             .outerjoin(Player1, Player1.id == RoomSlot.player1_id)
             .outerjoin(Player2, Player2.id == RoomSlot.player2_id)
             .outerjoin(Case, Case.id == RoomSlot.case_id)  # Добавляем join с кейсом
-            .where(RoomSlot.start_time >= now)
-            .where(RoomSlot.start_time <= end_time)
+            .where(RoomSlot.start_time >= as_utc_naive(now))
+            .where(RoomSlot.start_time <= as_utc_naive(end_time))
             .where(RoomSlot.is_occupied == True)
             .order_by(RoomSlot.start_time)
         )
@@ -327,8 +335,8 @@ async def get_upcoming_matches(
         for row in result.all():
             matches.append({
                 "id": row.id,
-                "start_time": row.start_time,
-                "end_time": row.end_time,
+                "start_time": to_moscow(row.start_time).isoformat(),
+                "end_time": to_moscow(row.end_time).isoformat(),
                 "status": row.status.name if row.status else "SCHEDULED",
                 "room_name": row.room_name,
                 "room_url": row.room_url,

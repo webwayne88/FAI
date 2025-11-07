@@ -13,7 +13,7 @@ from db.models import User, Room, RoomSlot, MatchStatus
 from salute.giga import analyze_winner
 from salute.jazz import get_room_transcription, SaluteJazzAPI
 from config import SDK_KEY_ENCODED, significant_difference, MIN_POINTS_TO_WIN
-
+from common.time_utils import format_moscow
 
 
 async def calculate_player_text_length(transcription: str, player_name: str) -> int:
@@ -110,7 +110,7 @@ async def send_match_results(bot, slot: RoomSlot):
             return
 
         elimination = slot.elimination
-        message = f"Результаты матча в {slot.start_time.strftime('%H:%M')}:\n"
+        message = f"Результаты матча в {format_moscow(slot.start_time, '%H:%M')}:\n"
 
         if slot.first_is_winner is not None:
             if slot.first_is_winner:
