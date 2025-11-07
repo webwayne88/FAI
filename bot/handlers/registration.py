@@ -1,4 +1,6 @@
 # registration.py
+import logging
+from pathlib import Path
 from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton, FSInputFile
 from aiogram.filters import CommandStart
@@ -14,6 +16,8 @@ from db.models import User, TimePreference
 from config import CORRECT_SECRET_CODE
 
 router = Router()
+logger = logging.getLogger(__name__)
+CONSENT_FILE = Path(__file__).resolve().parent / "soglasie.pdf"
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
@@ -68,15 +72,20 @@ async def process_secret_code(message: Message, state: FSMContext):
     await state.update_data(secret_code=secret_code)
     
     # Отправляем PDF с документом об обработке персональных данных
-    try:
-        document = FSInputFile("random_pdf.pdf")
-        await message.answer_document(
-            document,
-            caption="Пожалуйста, ознакомьтесь с документом о обработке персональных данных."
-        )
-    except Exception as e:
-        print(f"Ошибка при отправке документа: {e}")
-        await message.answer("Документ об обработке персональных данных временно недоступен.")
+    if CONSENT_FILE.exists():
+        try:
+            document = FSInputFile(str(CONSENT_FILE))
+            await message.answer_document(
+                document,
+                caption="Согласие на обработку персональных данных."
+            )
+        except Exception as exc:
+            logger.exception("Failed to send consent document: %s", exc)
+            await message.answer("Не удалось отправить документ. Попробуйте позже.")
+    else:
+        logger.error("Consent document file not found: %s", CONSENT_FILE)
+        await message.answer("Файл согласия не найден в системе. Пожалуйста, свяжитесь с организаторами или повторите попытку позже.")
+
     
     # Запрашиваем согласие
     await message.answer(

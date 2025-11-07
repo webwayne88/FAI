@@ -507,6 +507,9 @@
             const tabBtns = document.querySelectorAll('.tab-btn');
             const tabContents = document.querySelectorAll('.tab-content');
             const deleteSlotsBtn = document.getElementById('deleteSlotsBtn');
+            // Элементы выбора дат планирования
+            const scheduleStartDateInput = document.getElementById('scheduleStartDatePicker');
+            const scheduleEndDateInput = document.getElementById('scheduleEndDatePicker');
             const reserveScheduleBtn = document.getElementById('reserveScheduleBtn');
             const addManualCaseBtn = document.getElementById('addManualCaseBtn');
             const manualCaseStatusDiv = document.getElementById('manualCaseStatus');
@@ -571,7 +574,18 @@
             const tomorrow = new Date();
             tomorrow.setDate(tomorrow.getDate() + 1);
             if (datePicker) datePicker.valueAsDate = today;
-            if (scheduleDatePicker) scheduleDatePicker.valueAsDate = tomorrow;
+
+            // Если стартовая дата задана — по умолчанию подставляем её в конечную
+            if (scheduleStartDateInput && scheduleEndDateInput) {
+                // Автокопирование конца при изменении начала
+                scheduleStartDateInput.addEventListener('change', () => {
+                    scheduleEndDateInput.value = scheduleStartDateInput.value || '';
+                });
+                // На первичной загрузке: если конец пуст, копируем из начала
+                if (!scheduleEndDateInput.value && scheduleStartDateInput.value) {
+                    scheduleEndDateInput.value = scheduleStartDateInput.value;
+                }
+            }
 
             function formatDateToDDMMYYYY(dateString) {
                 const date = new Date(dateString);
@@ -829,10 +843,10 @@
             // === Планирование ===
             async function startScheduling() {
                 const startDate = document.getElementById('scheduleStartDatePicker').value;
-                const endDate = document.getElementById('scheduleEndDatePicker').value;
+                const endDate = startDate;
                 const eliminationMode = document.querySelector('input[name="eliminationMode"]:checked').value === 'true';
                 
-                if (!startDate || !endDate) {
+                if (!startDate) {
                     statusDiv.innerHTML = '<span class="error">Выберите начальную и конечную дату</span>';
                     statusDiv.classList.add('error');
                     return;

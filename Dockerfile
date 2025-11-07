@@ -5,8 +5,8 @@ FROM python:3.11
 WORKDIR /app
 
 # 3. Устанавливаем переменные окружения, чтобы Python работал корректнее
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 # 4. Обновляем pip и устанавливаем зависимости
 COPY requirements.txt .

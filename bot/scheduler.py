@@ -35,110 +35,94 @@ from config import (
 )
 from common.time_utils import as_utc_naive, ensure_utc, format_moscow
 
-async def schedule_matches(target_date: datetime, elimination=True):
+
+async def get_all_room_slots_on_date(session, date: datetime.date) -> List[RoomSlot]:
+    start = datetime.combine(date, time.min)
+    end = start + timedelta(days=1)
+    result = await session.execute(
+        select(RoomSlot)
+        .where(RoomSlot.start_time >= start)
+        .where(RoomSlot.start_time < end)
+        .order_by(RoomSlot.start_time)
+    )
+    return result.scalars().all()
+
+
+async def has_scheduled_match_today(session, user_id: int, date) -> bool:
+    start = datetime.combine(date, time.min)
+    end = start + timedelta(days=1)
+    count = await session.scalar(
+        select(func.count(RoomSlot.id))
+        .where(RoomSlot.start_time >= start)
+        .where(RoomSlot.start_time < end)
+        .where((RoomSlot.player1_id == user_id) | (RoomSlot.player2_id == user_id))
+    )
+    return count > 0
+
+
+async def schedule_matches(
+    target_date: datetime,
+    elimination=True,
+    tournament_mode=True  # <-- новый флаг
+):
     async with async_session() as session:
         users = await get_active_users(session, target_date)
         if not users:
             logging.info("Нет активных пользователей для планирования.")
             return {"scheduled_count": 0, "reserve_users": 0}
 
-        room_slots = await get_available_room_slots(session, target_date)
-        if not room_slots:
-            logging.warning(f"Слоты на {target_date.date()} не найдены. Запускаю автоматическое создание...")
-            await create_rooms_and_slots(target_date=target_date, slot_duration_minutes=slot_duration_minutes)
-            room_slots = await get_available_room_slots(session, target_date)
-
-        users_with_scheduled_match = set()
-        users_by_period = {period: [] for period in PERIODS}
-        
-        for user in users:
-            if user.time_preference == TimePreference.ANYTIME:
-                for period in PERIODS:
-                    users_by_period[period].append(user)
-            else:
-                users_by_period[user.time_preference].append(user)
-        
-        anytime_users = [user for user in users if user.time_preference == TimePreference.ANYTIME]
-
-        scheduled_count = 0
-        for period, period_config in PERIODS.items():
-            period_start = as_utc_naive(datetime.combine(target_date.date(), period_config['start']))
-            period_end = as_utc_naive(datetime.combine(target_date.date(), period_config['end']))
-
-            
-            period_slots = [
+        if tournament_mode:
+            # В турнирном режиме: получаем ВСЕ слоты на дату, отсортированные по времени
+            room_slots = await get_all_room_slots_on_date(session, target_date.date())
+            # Фильтруем только свободные
+            available_slots = [
                 slot for slot in room_slots
-                if period_start <= slot.start_time < period_end and not slot.is_occupied
+                if not slot.is_occupied and slot.player1_id is None
             ]
-            
-            period_slots = sorted(period_slots, key=lambda x: x.start_time)
-            
-            period_users = sorted([user for user in users_by_period[period] if user.id not in users_with_scheduled_match], key = lambda x: -1*x.matches_played)
-            
-            for slot in period_slots:
-                if len(period_users) >= 2:
-                    player1 = period_users.pop()
-                    player2 = period_users.pop()
-                    
-                    # Назначаем матч
-                    slot.player1_id = player1.id
-                    slot.player2_id = player2.id
-                    slot.status = MatchStatus.SCHEDULED
-                    slot.is_occupied = True
-                    slot.elimination = elimination
-                    
-                    # Добавляем пользователей в множество тех, кому уже запланирован матч
-                    users_with_scheduled_match.add(player1.id)
-                    users_with_scheduled_match.add(player2.id)
-                    
-                    await notify_match_scheduled(player1, player2, slot)
-                    scheduled_count += 1
-                    logging.info(
-                        "Создан матч в периоде %s: %s vs %s в %s (комната %s)",
-                        period,
-                        player1.full_name,
-                        player2.full_name,
-                        format_moscow(slot.start_time, "%H:%M"),
-                        slot.room_id,
-                    )
-        # Второй проход: заполняем оставшиеся слоты пользователями с ANYTIME
-        # и пользователями из других периодов, у которых еще нет матча
-        remaining_slots = [slot for slot in room_slots if not slot.is_occupied]
-        remaining_users = [user for user in users if user.id not in users_with_scheduled_match]
+            # Берём самый ранний блок времени (все слоты в один момент — один раунд)
+            if not available_slots:
+                logging.warning("Нет свободных слотов для турнирного раунда.")
+                return {"scheduled_count": 0, "reserve_users": 0}
 
-        
-        # Сортируем оставшиеся слоты по времени
-        remaining_slots = sorted(remaining_slots, key=lambda x: x.start_time)
-        
-        # Заполняем оставшиеся слоты
-        for i in range(0, len(remaining_users) - 1, 2):
-            if i >= len(remaining_slots):
-                break
-                
-            player1 = remaining_users[i]
-            player2 = remaining_users[i + 1]
-            slot = remaining_slots[i // 2]  # Берем слот по порядку
-            
-            # Назначаем матч
-            slot.player1_id = player1.id
-            slot.player2_id = player2.id
-            slot.status = MatchStatus.SCHEDULED
-            slot.is_occupied = True
-            
-            # Добавляем пользователей в множество тех, кому уже запланирован матч
-            users_with_scheduled_match.add(player1.id)
-            users_with_scheduled_match.add(player2.id)
-            
-            await notify_match_scheduled(player1, player2, slot)
-            scheduled_count += 1
-            logging.info(f"Создан матч в свободном слоте: {player1.full_name} vs {player2.full_name} в {slot.start_time.strftime('%H:%M')} (комната {slot.room_id})")
-        
-        await session.commit()
-        return {
-            "scheduled_count": scheduled_count,
-            "reserve_users": 0
-        }
-        
+            # Определяем время первого свободного раунда
+            first_slot_time = min(slot.start_time for slot in available_slots)
+            round_slots = [
+                slot for slot in available_slots if slot.start_time == first_slot_time]
+
+            # Сортируем пользователей
+            free_users = sorted(
+                [u for u in users if not await has_scheduled_match_today(session, u.id, target_date.date())],
+                key=lambda u: u.matches_played
+            )
+
+            scheduled_count = 0
+            for i in range(0, len(free_users) - 1, 2):
+                if i // 2 >= len(round_slots):
+                    break
+                p1, p2 = free_users[i], free_users[i + 1]
+                slot = round_slots[i // 2]
+
+                slot.player1_id = p1.id
+                slot.player2_id = p2.id
+                slot.status = MatchStatus.SCHEDULED
+                slot.is_occupied = True
+                slot.elimination = elimination
+
+                await notify_match_scheduled(p1, p2, slot)
+                scheduled_count += 1
+
+            await session.commit()
+            return {"scheduled_count": scheduled_count, "reserve_users": 0}
+
+        else:
+            scheduled_count=0
+            await session.commit()
+            return {
+                "scheduled_count": scheduled_count,
+                "reserve_users": 0
+            }
+
+
 async def get_active_users(session: AsyncSession, target_date: datetime) -> List[User]:
     # Использовать EXISTS вместо NOT IN для лучшей производительности
     busy_subq = select(1).where(
@@ -150,37 +134,50 @@ async def get_active_users(session: AsyncSession, target_date: datetime) -> List
         select(User)
         .where(User.registered == True)
         .where(User.tg_id.isnot(None))
-        .where(User.matches_played_cycle == 0)
+        # .where(User.matches_played_cycle == 0)
         .where(User.eliminated == False)
         .where(~busy_subq)
         .order_by(User.matches_played.asc(), User.declines_count.asc())
     )
+    logging.info(f"Найдено {len(users)} активных пользователей для планирования на {target_date.date()}.")
+    logging.info(f"Активные пользователи: {[user.full_name for user in users]}")
     return result.scalars().all()
 
-async def get_available_room_slots(session: AsyncSession, target_date: datetime) -> List[RoomSlot]:
+
+async def get_available_room_slots(
+    session: AsyncSession,
+    target_date: datetime,
+    ignore_time_filter: bool = False  # <-- новый параметр
+) -> List[RoomSlot]:
     start_of_day = datetime.combine(target_date.date(), time.min)
     end_of_day = datetime.combine(target_date.date(), time.max)
-    
-    # Get the current time with the same date as the target date to ensure consistent filtering
-    now_utc = ensure_utc(datetime.now(UTC_TZ)) + timedelta(seconds=INVITATION_TIMEOUT)
-    if target_date.date() == now_utc.date():
-        filter_start_time = as_utc_naive(now_utc)
-    else:
-        # Otherwise, select all slots from the beginning of the day
+
+    if ignore_time_filter:
+        # В турнирном режиме: возвращаем ВСЕ слоты на дату, даже в прошлом
         filter_start_time = start_of_day
-    
+    else:
+        # Стандартный режим: не показывать "прошедшие" слоты
+        now_utc = ensure_utc(datetime.now(UTC_TZ)) + \
+            timedelta(seconds=INVITATION_TIMEOUT)
+        if target_date.date() == now_utc.date():
+            filter_start_time = as_utc_naive(now_utc)
+        else:
+            filter_start_time = start_of_day
+
     result = await session.execute(
         select(RoomSlot)
-        .where(RoomSlot.start_time >= filter_start_time)  # This is the new condition
+        .where(RoomSlot.start_time >= filter_start_time)
         .where(RoomSlot.start_time <= end_of_day)
         .where(RoomSlot.is_occupied == False)
         .options(selectinload(RoomSlot.room))
     )
     return result.scalars().all()
 
+
 async def notify_match_scheduled(player1: User, player2: User, slot: RoomSlot):
     await send_confirmation_request(bot, player1, player2, slot)
     await send_confirmation_request(bot, player2, player1, slot)
+
 
 async def create_rooms_and_slots(
     target_date: datetime,
@@ -195,9 +192,9 @@ async def create_rooms_and_slots(
         room_count (int): Количество комнат для создания (если комнат нет).
         slot_duration_minutes (int): Длительность одного слота в минутах.
     """
-    
+
     api = SaluteJazzAPI(SDK_KEY_ENCODED)
-    
+
     async with async_session() as session:
         # --- 1. Получаем существующие активные комнаты из БД ---
         result = await session.execute(
@@ -218,9 +215,9 @@ async def create_rooms_and_slots(
                     room_number = len(existing_rooms) + i + 1
                     room_title = f"Room #{room_number}"
                     logging.info("Создание комнаты: %s", room_title)
-                    
+
                     room_data = await api.create_room(room_title)
-                    
+
                     room_info = {
                         "name": room_title,
                         "url": room_data['roomUrl'],
@@ -228,8 +225,9 @@ async def create_rooms_and_slots(
                     }
                     rooms_list.append(room_info)
                     await asyncio.sleep(1)
-                    
-                logging.info("Успешно создано %s комнат через API.", len(rooms_list))
+
+                logging.info(
+                    "Успешно создано %s комнат через API.", len(rooms_list))
 
             except Exception:
                 logging.exception("Ошибка при создании комнат через API")
@@ -239,16 +237,17 @@ async def create_rooms_and_slots(
             for room_data in rooms_list:
                 name = room_data.get('name')
                 url = room_data.get('url')
-                
+
                 if not name or not url:
-                    logging.error("Данные комнаты из API не содержат name или url. Пропускаем.")
+                    logging.error(
+                        "Данные комнаты из API не содержат name или url. Пропускаем.")
                     continue
 
                 room = Room(room_name=name, room_url=url, is_active=True)
                 session.add(room)
-            
+
             await session.commit()
-            
+
             # --- 4. Получаем сохраненные комнаты для создания слотов ---
             result = await session.execute(
                 select(Room).where(Room.is_active == True)
@@ -272,21 +271,25 @@ async def create_rooms_and_slots(
                 .where(RoomSlot.start_time >= start_of_day)
                 .where(RoomSlot.start_time < end_of_day)
             )
-            
+
             if result.scalars().first():
-                logging.info(f"Слоты для комнаты {room.id} ({room.room_name}) на {target_date.date()} уже существуют.")
+                logging.info(
+                    f"Слоты для комнаты {room.id} ({room.room_name}) на {target_date.date()} уже существуют.")
                 continue
 
             # Генерируем новые слоты на основе периодов из конфига
-            logging.info(f"Генерируем слоты для комнаты {room.id} ({room.room_name}) на основе периодов из конфига...")
-            
+            logging.info(
+                f"Генерируем слоты для комнаты {room.id} ({room.room_name}) на основе периодов из конфига...")
+
             new_slots = []
-            
+
             # Проходим по всем периодам из конфига
             for slot_time in TOURNAMENT_SLOT_STARTS_MSK:
-                slot_start_msk = datetime.combine(target_date.date(), slot_time, tzinfo=MOSCOW_TZ)
+                slot_start_msk = datetime.combine(
+                    target_date.date(), slot_time, tzinfo=MOSCOW_TZ)
                 slot_start_utc = slot_start_msk.astimezone(UTC_TZ)
-                slot_end_utc = slot_start_utc + timedelta(minutes=slot_duration_minutes)
+                slot_end_utc = slot_start_utc + \
+                    timedelta(minutes=slot_duration_minutes)
 
                 slot = RoomSlot(
                     room_id=room.id,
@@ -311,7 +314,7 @@ async def create_rooms_and_slots(
 
 async def process_pending_matches():
     """Фоновая задача для обработки матчей, которые не были обработаны"""
-    #TO DO оставить только отправку в гигачат на оценку - фоновая задача например в конце каждого дня
+    # TO DO оставить только отправку в гигачат на оценку - фоновая задача например в конце каждого дня
     while True:
         await asyncio.sleep(REFRESH_CHECK_PERIOD)
         try:
@@ -327,11 +330,11 @@ async def process_pending_matches():
                     .where(RoomSlot.status == MatchStatus.CONFIRMED)
                     .options(selectinload(RoomSlot.player1), selectinload(RoomSlot.player2), selectinload(RoomSlot.room), selectinload(RoomSlot.case))
                 )
-                
+
                 pending_slots = result.scalars().all()
-                
+
                 for slot in pending_slots:
                     await process_completed_match(session, slot)
-                    
+
         except Exception as e:
             logging.error(f"Ошибка в обработке pending matches: {e}")

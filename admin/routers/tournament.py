@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete  # Добавляем delete здесь
 from datetime import datetime, timedelta, date, time, timezone
 from db.models import User, Room, RoomSlot, MatchStatus, Case, TimePreference
-from bot.scheduler import schedule_matches
+from bot.scheduler import schedule_matches, create_rooms_and_slots
 from db.database import get_db
 from pydantic import BaseModel
 from sqlalchemy.orm import aliased, selectinload
@@ -86,56 +86,34 @@ async def run_scheduling(
     request: ScheduleRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    """Запускает процесс планирования матчей для диапазона дат"""
+    """Запускает следующий турнирный раунд на сегодня"""
     try:
-        total_scheduled = 0
-        total_days = 0
-        current_date = request.start_date
-        
-        while current_date <= request.end_date:
-            target_date = datetime.combine(current_date, time.min).replace(tzinfo=timezone.utc)
+        today = datetime.now(timezone.utc).date()
+        target_datetime = datetime.combine(today, time.min).replace(tzinfo=timezone.utc)
 
-            # Проверяем, есть ли уже матчи на эту дату
-            start_dt = as_utc_naive(target_date)
-            end_dt = as_utc_naive(target_date + timedelta(days=1))
-            
-            existing_count = await db.scalar(
-                select(func.count(RoomSlot.id))
-                .where(RoomSlot.start_time >= start_dt)
-                .where(RoomSlot.start_time < end_dt)
-                .where(RoomSlot.player1_id.isnot(None))
-            )
-            
-            available_count = await db.scalar(
-                select(func.count(RoomSlot.id))
-                .where(RoomSlot.start_time >= start_dt)
-                .where(RoomSlot.start_time < end_dt)
-                .where(RoomSlot.is_occupied == False)
-            )
+        # Запускаем турнирный раунд
+        result = await schedule_matches(
+            session=db, 
+            target_date=target_datetime,
+            elimination=request.elimination,
+            tournament_mode=True  # <-- ключевой флаг
+        )
 
-            if existing_count and existing_count > 0 and not available_count:
-                # Пропускаем час, если уже всё запланировано
-                current_date += timedelta(hours=1)
-                continue
-            
-            # Передаем параметр elimination в schedule_matches
-            result = await schedule_matches(target_date, elimination=request.elimination)
-            total_scheduled += result['scheduled_count']
-            total_days += 1
-            current_date += timedelta(hours=1)
-        
         stats = await get_stats_from_db(db)
-        
+
+        msg = f"Турнирный раунд завершён: {result['scheduled_count']} матчей запланировано."
+        if result['scheduled_count'] == 0:
+            msg = "Нет свободных слотов или недостаточно участников для нового раунда."
+
         return {
-            "message": f"Планирование на период с {request.start_date} по {request.end_date} завершено! Запланировано матчей: {total_scheduled} за {total_days} дней.",
-            "scheduled_count": total_scheduled,
+            "message": msg,
+            "scheduled_count": result['scheduled_count'],
             "stats": stats
         }
+
     except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Ошибка планирования: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Ошибка: {str(e)}")
+        
 
 
 @router.get("/rooms")
