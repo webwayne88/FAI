@@ -43,17 +43,9 @@ PERIODS = {
     TimePreference.EVENING: {"start": _PERIOD_START_UTC, "end": _PERIOD_END_UTC},
 }
 
-# В режиме разработки / теста
-_now = datetime.now(MOSCOW_TZ)
 TOURNAMENT_SLOT_STARTS_MSK = [
-    (_now + timedelta(minutes=1)).time(),
-    (_now + timedelta(minutes=25)).time(),
-]
-
-#для тестирования       
-TOURNAMENT_SLOT_STARTS_MSK = [
-    time(11, 0),
-    time(11, 30),
-    time(12, 0),
-    time(12, 30),
+    time(15, 30),
+    time(16, 0),
+    time(16, 30),
+    time(17, 0),
 ]

@@ -77,15 +77,18 @@ async def schedule_matches(
             available_slots = await get_available_room_slots(
                 session,
                 target_date,
-                ignore_time_filter=True,
+                ignore_time_filter=False,
             )
 
             if not available_slots:
                 logging.warning(f"Слоты на {target_date.date()} не найдены. Запускаю автоматическое создание...")
                 await create_rooms_and_slots(target_date=target_date, slot_duration_minutes=slot_duration_minutes)
                 available_slots = await get_available_room_slots(session, target_date)
+                logging.info(f"После создания найдено слотов: {len(available_slots)}")
+                # logging.info(f"Слоты: {[slot.start_time for slot in available_slots]}")
             # Определяем время первого свободного раунда
             first_slot_time = min(slot.start_time for slot in available_slots)
+        
             round_slots = [
                 slot for slot in available_slots if slot.start_time == first_slot_time]
 
@@ -158,17 +161,17 @@ async def get_available_room_slots(
     start_of_day = datetime.combine(target_date.date(), time.min)
     end_of_day = datetime.combine(target_date.date(), time.max)
 
-    if ignore_time_filter:
-        # В турнирном режиме: возвращаем ВСЕ слоты на дату, даже в прошлом
-        filter_start_time = start_of_day
+    # if ignore_time_filter:
+    #     # В турнирном режиме: возвращаем ВСЕ слоты на дату, даже в прошлом
+    #     filter_start_time = start_of_day
+    # else:
+    # Стандартный режим: не показывать "прошедшие" слоты
+    now_utc = ensure_utc(datetime.now(UTC_TZ)) + \
+        timedelta(seconds=INVITATION_TIMEOUT)
+    if target_date.date() == now_utc.date():
+        filter_start_time = as_utc_naive(now_utc)
     else:
-        # Стандартный режим: не показывать "прошедшие" слоты
-        now_utc = ensure_utc(datetime.now(UTC_TZ)) + \
-            timedelta(seconds=INVITATION_TIMEOUT)
-        if target_date.date() == now_utc.date():
-            filter_start_time = as_utc_naive(now_utc)
-        else:
-            filter_start_time = start_of_day
+        filter_start_time = start_of_day
 
     result = await session.execute(
         select(RoomSlot)

@@ -60,11 +60,10 @@ async def process_completed_match(session: AsyncSession, slot: RoomSlot):
             slot.first_is_winner = True
         elif "Игрок 2" in verdict_line or slot.player2.full_name in verdict_line:
             slot.first_is_winner = False
-        else:
-            slot.first_is_winner = None
+
         # Сохраняем анализ для каждого игрока
-        slot.player1_analysis = "Анализ недоступен"
-        slot.player2_analysis = "Анализ недоступен"
+        slot.player1_analysis = lines[1] + '\n' + lines[2] if len(lines) > 2 else lines[1]
+        slot.player2_analysis = lines[1] + '\n' + lines[2] if len(lines) > 2 else lines[1]
 
         # ВЫЧИСЛЕНИЕ ДЛИН ТЕКСТОВ ИГРОКОВ ДЛЯ СУММАРНОЙ СТАТИСТИКИ
         player1_text_length = await calculate_player_text_length(transcription_text, slot.player1.full_name)
@@ -129,16 +128,12 @@ async def send_match_results(bot, slot: RoomSlot):
         # Отправляем каждому игроку его персональный анализ
         await bot.send_message(
             slot.player1.tg_id,
-            message +
-            f"\nВаши очки: {slot.player1_points}/50\n" +
-            f"Анализ вашего выступления:\n{getattr(slot, 'player1_analysis', 'Анализ недоступен')}"
+            message
         )
 
         await bot.send_message(
             slot.player2.tg_id,
-            message +
-            f"\nВаши очки: {slot.player2_points}/50\n" +
-            f"Анализ вашего выступления:\n{getattr(slot, 'player2_analysis', 'Анализ недоступен')}"
+            message
         )
 
     except Exception as e:
