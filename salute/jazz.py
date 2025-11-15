@@ -125,6 +125,20 @@ class SaluteJazzAPI:
             ) as response:
                 return await response.json()
 
+    async def get_room_participants(self, room_id: str) -> List[Dict[str, Any]]:
+        token = await self._get_access_token()
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://api.salutejazz.ru/v1/room/{room_id}/participants",
+                headers={
+                    'Accept': 'application/json',
+                    'Authorization': f'Bearer {token}'
+                }
+            ) as response:
+                if response.status == 404:
+                    return []
+                return await response.json()
+
 
 api = SaluteJazzAPI(SDK_KEY_ENCODED)
 

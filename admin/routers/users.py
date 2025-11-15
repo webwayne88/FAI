@@ -10,6 +10,7 @@ from datetime import datetime
 
 router = APIRouter(prefix="/users", tags=["users"])
 
+
 class UserResponse(BaseModel):
     id: int
     tg_id: Optional[int]
@@ -23,6 +24,7 @@ class UserResponse(BaseModel):
     eliminated: bool
     total_transcription_length: int
 
+
 class UserUpdateRequest(BaseModel):
     full_name: Optional[str] = None
     university: Optional[str] = None
@@ -34,6 +36,7 @@ class UserUpdateRequest(BaseModel):
     registered: Optional[bool] = None
     eliminated: Optional[bool] = None
 
+
 @router.put("/{user_id}", response_model=UserResponse)
 async def update_user(
     user_id: int,
@@ -44,11 +47,13 @@ async def update_user(
     try:
         user = await db.get(User, user_id)
         if not user:
-            raise HTTPException(status_code=404, detail="Пользователь не найден")
+            raise HTTPException(
+                status_code=404, detail="Пользователь не найден")
 
         # Получаем только переданные поля (исключаем None значения)
-        update_data = {k: v for k, v in user_data.dict().items() if v is not None}
-        
+        update_data = {k: v for k, v in user_data.dict().items()
+                       if v is not None}
+
         # Обрабатываем time_preference отдельно - только если оно передано и не пустое
         if "time_preference" in update_data:
             pref_key = update_data.pop("time_preference")
@@ -66,7 +71,7 @@ async def update_user(
         # Обновляем остальные поля
         for key, value in update_data.items():
             setattr(user, key, value)
-        
+
         await db.commit()
         await db.refresh(user)
 
@@ -81,11 +86,14 @@ async def update_user(
             detail=f"Ошибка обновления пользователя: {str(e)}"
         )
 
+
 @router.get("/", response_model=List[UserResponse])
 async def get_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
-    sort_by: str = Query("full_name", regex="^(id|full_name|university|contact|matches_played|wins_count|sum_points|registered|eliminated)$"),  # Добавляем eliminated в сортировку
+    # Добавляем eliminated в сортировку
+    sort_by: str = Query(
+        "full_name", regex="^(id|full_name|university|contact|matches_played|wins_count|sum_points|registered|eliminated)$"),
     order: str = Query("asc", regex="^(asc|desc)$"),
     search: Optional[str] = Query(None),
     hide_eliminated: bool = Query(False),  # Новый параметр для фильтрации
@@ -94,7 +102,7 @@ async def get_users(
     """Получение списка пользователей с пагинацией и сортировкой"""
     try:
         query = select(User)
-        
+
         if search:
             query = query.where(
                 or_(
@@ -102,29 +110,30 @@ async def get_users(
                     User.university.ilike(f"%{search}%")
                 )
             )
-        
+
         # Фильтрация по eliminated
         if hide_eliminated:
             query = query.where(User.eliminated == False)
-        
+
         sort_column = getattr(User, sort_by, None)
         if sort_column is not None:
             if order == "asc":
                 query = query.order_by(sort_column.asc())
             else:
                 query = query.order_by(sort_column.desc())
-        
+
         query = query.offset(skip).limit(limit)
-        
+
         result = await db.execute(query)
         users = result.scalars().all()
-        
+
         return users
     except Exception as e:
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail=f"Ошибка получения пользователей: {str(e)}"
         )
+
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
@@ -137,16 +146,17 @@ async def get_user(
             select(User).where(User.id == user_id)
         )
         user = result.scalar_one_or_none()
-        
+
         if not user:
-            raise HTTPException(status_code=404, detail="Пользователь не найден")
-            
+            raise HTTPException(
+                status_code=404, detail="Пользователь не найден")
+
         return user
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail=f"Ошибка получения пользователя: {str(e)}"
         )
 
@@ -159,14 +169,14 @@ async def get_users_count(
     """Получение общего количества пользователей"""
     try:
         query = select(func.count(User.id))
-        
+
         if hide_eliminated:
             query = query.where(User.eliminated == False)
-            
+
         count = await db.scalar(query)
         return {"total_users": count}
     except Exception as e:
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail=f"Ошибка получения количества пользователей: {str(e)}"
         )

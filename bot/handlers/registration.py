@@ -110,7 +110,7 @@ async def process_privacy_agreement(message: Message, state: FSMContext):
     
     # Если согласие получено, переходим к предупреждению о времени матчей
     await message.answer(
-        "⚠️ Обратите внимание! Все матчи проводятся с 18:00 до 22:00.\n\n"
+        "⚠️ Обратите внимание! Все матчи проводятся с 15:00 до 22:00.\n\n"
         "Вы согласны участвовать в указанное время?",
         reply_markup=yes_no_keyboard
     )

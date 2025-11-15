@@ -427,7 +427,14 @@ async def process_match_after_completion(bot: Bot, slot: RoomSlot):
                 start_time=to_moscow(updated_slot.start_time),
                 end_time=to_moscow(updated_slot.end_time) - timedelta(minutes=analyze_time)
             )
-            
+
+            if not parsed_transcription or not parsed_transcription.strip():
+                logging.warning(
+                    "Пустая расшифровка для слота %s, сохраняем исходный текст или плейсхолдер",
+                    updated_slot.id,
+                )
+                parsed_transcription = transcription_text or "[NO TRANSCRIPTION DATA]"
+
             await save_transcription(session, updated_slot.id, parsed_transcription)
 
             player1_connected = check_player_connection(parsed_transcription, updated_slot.player1.full_name)
@@ -456,27 +463,52 @@ async def process_match_after_completion(bot: Bot, slot: RoomSlot):
             else:
                 await process_completed_match(session, updated_slot)
                 await send_match_results(bot, updated_slot)
+                await session.commit()
     except Exception as e:
         logging.error(f"Ошибка в process_match_after_completion: {e}")
 
-def check_player_connection(transcription: str, player_name: str) -> bool:
-    """Проверяет, подключился ли игрок к матчу по транскрипции"""
-    return player_name in transcription
+def _normalise_text(value: str) -> str:
+    return "".join(ch.lower() if ch.isalnum() or ch.isspace() else " " for ch in value or "")
 
-async def save_transcription(session: AsyncSession, slot_id: int, transcription: str):
-    """Сохраняет транскрипцию в базе данных"""
+
+def check_player_connection(transcription: str, player_name: str) -> bool:
+    """Проверяет, подключился ли игрок к матчу по транскрипции."""
+    if not transcription or not player_name:
+        return False
+
+    text = _normalise_text(transcription)
+    name = _normalise_text(player_name)
+
+    if name and name in text:
+        return True
+
+    first_token = name.split()[0] if name else ""
+    if first_token and first_token in text:
+        return True
+
+    return False
+
+async def save_transcription(session: AsyncSession, slot_id: int, transcription: str) -> bool:
+    """Сохраняет транскрипцию в базе данных.
+
+    Возвращает True, если сохранен содержательный текст.
+    """
     try:
         slot = await session.get(RoomSlot, slot_id)
         if slot:
-            slot.transcription = transcription
+            clean_text = transcription if transcription and transcription.strip() else "[NO TRANSCRIPTION DATA]"
+            slot.transcription = clean_text
             slot.transcription_processed = False
-            await session.commit()
+            await session.flush()
             logging.info(f"Транскрипция для слота {slot_id} была успешно сохранена.")
+            return bool(transcription and transcription.strip())
         else:
             logging.warning(f"Не удалось найти слот с ID {slot_id} для сохранения транскрипции.")
+            return False
     except Exception as e:
         logging.error(f"Произошла ошибка при сохранении транскрипции для слота {slot_id}: {e}")
         await session.rollback()
+        return False
 
 async def send_personalized_case(bot: Bot, player1: User, player2: User, case_text: str):
     """Отправляет персонализированный кейс игрокам с экранированием MarkdownV2 и жирными заголовками."""
@@ -542,11 +574,20 @@ async def refresh_link(bot: Bot, slot: RoomSlot):
         await session.rollback()
 
 async def send_link(bot: Bot, player: User, slot: RoomSlot):
-    """Отправляет кейс и ссылку игроку"""
+    """Отправляет ссылку на комнату конкретному игроку."""
+    if not player or not player.tg_id:
+        return
+    room_url = slot.room.room_url if slot.room else None
+    if not room_url:
+        logging.warning(f"Не удалось отправить ссылку игроку {player.id}: у слота {slot.id} нет комнаты.")
+        return
+
+    message = (
+        "🔗 Ссылка на комнату\n"
+        f"{room_url}"
+    )
+
     try:
-        message = (
-            f"🔗 Ссылка на комнату: {slot.room.room_url}"
-        )
         await bot.send_message(player.tg_id, message)
-    except Exception as e:
-        logging.error(f"Ошибка отправки ссылки и кейса: {e}")
+    except Exception as exc:
+        logging.error("Ошибка отправки ссылки игроку %s: %s", player.full_name, exc)

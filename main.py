@@ -1,22 +1,27 @@
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
+
 from aiogram import Bot
 from aiogram.filters import Command
 from aiogram.types import BotCommand, Message
-from sqlalchemy import select
-from db.database import init_db, async_session
-from db.models import User
-from bot.handlers import register_handlers
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from bot.scheduler import schedule_matches, process_pending_matches
-from datetime import datetime, timedelta, timezone
-from bot.bot import bot, dp
+from sqlalchemy import select
+
+from app.container import get_container
+from bot.tg_bot import bot, dp
+from bot.handlers import register_handlers
+from db.database import async_session, init_db
+from db.models import User
+
+container = get_container()
+
 
 async def scheduled_task():
     """Задача для планирования матчей"""
     try:
         target_date = datetime.now(timezone.utc) + timedelta(days=1)
-        await schedule_matches(target_date)
+        await container.match_scheduler.schedule_matches(target_date)
     except Exception as e:
         logging.error(f"Ошибка при планировании матчей: {e}")
 
@@ -84,6 +89,8 @@ async def main():
     # Инициализация базы данных
     await init_db()
 
+    dp["container"] = container
+
     # Запуск планировщика
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
@@ -94,7 +101,7 @@ async def main():
     )
     scheduler.start()
     
-    asyncio.create_task(process_pending_matches())
+    asyncio.create_task(container.match_result_service.run_pending_loop())
 
     logging.info("Бот запущен. Планировщик активирован.")
     await dp.start_polling(bot)

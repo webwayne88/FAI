@@ -2,6 +2,7 @@ fastapi
 uvicorn
 sqlalchemy
 pydantic
+pydantic_settings
 aiogram
 python-docx
 aiosqlite
@@ -19,3 +20,5 @@ psycopg2-binary
 passlib[bcrypt]
 pytz
 python-multipart
+pytest
+pytest-asyncio
